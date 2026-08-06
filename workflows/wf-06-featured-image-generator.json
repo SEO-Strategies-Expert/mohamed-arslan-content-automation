@@ -9,6 +9,15 @@
               "name": "jobId"
             },
             {
+              "name": "assetKey"
+            },
+            {
+              "name": "assetType"
+            },
+            {
+              "name": "language"
+            },
+            {
               "name": "mode"
             },
             {
@@ -21,7 +30,7 @@
               "name": "driveFileId"
             },
             {
-              "name": "brandName"
+              "name": "brandConfig"
             }
           ]
         }
@@ -38,7 +47,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst jobId = (j.jobId || \"\").trim();\nconst headline = (j.headline || \"\").trim();\nconst mode = j.mode || \"generate_background_and_render_text\";\nconst validModes = [\"existing_drive_image\", \"generate_background_and_render_text\", \"render_from_template\"];\nconst driveFileId = j.driveFileId || null;\n\nif (!jobId) {\n  return { ok: false, errorCode: \"INVALID_INPUT\", errorMessage: \"jobId is required for featured image generator.\" };\n}\nif (!headline && mode !== \"existing_drive_image\") {\n  return { ok: false, errorCode: \"INVALID_INPUT\", errorMessage: \"headline is required for image generation mode \" + mode };\n}\nif (!validModes.includes(mode)) {\n  return { ok: false, errorCode: \"INVALID_MODE\", errorMessage: \"mode must be one of: \" + validModes.join(\", \") };\n}\nif (mode === \"existing_drive_image\" && !driveFileId && (!$input.item.binary || !$input.item.binary.data)) {\n  return { ok: false, errorCode: \"DRIVE_FILE_MISSING\", errorMessage: \"driveFileId or binary input is required for existing_drive_image mode.\" };\n}\n\nreturn {\n  jobId,\n  mode,\n  headline,\n  subheadline: j.subheadline || \"\",\n  driveFileId,\n  brandName: j.brandName || \"Mohamed Arslan\",\n  ok: true\n};"
+        "jsCode": "const j = $json || {};\nconst jobId = (j.jobId || \"\").trim();\nconst assetKey = (j.assetKey || \"\").trim();\nconst assetType = (j.assetType || \"featured_image\").trim();\nconst language = j.language || \"ar\";\nconst headline = (j.headline || \"\").trim();\nconst mode = j.mode || \"generate_background_and_render_text\";\nconst validModes = [\"existing_drive_image\", \"generate_background_and_render_text\", \"render_from_template\"];\nconst driveFileId = j.driveFileId || null;\n\nif (!jobId) {\n  return { ok: false, errorCode: \"INVALID_INPUT\", errorMessage: \"jobId is required for featured image generator.\" };\n}\nif (!assetKey) {\n  return { ok: false, errorCode: \"INVALID_INPUT\", errorMessage: \"assetKey is required for featured image generator.\" };\n}\nif (!assetType) {\n  return { ok: false, errorCode: \"INVALID_INPUT\", errorMessage: \"assetType is required for featured image generator.\" };\n}\nif (!headline && mode !== \"existing_drive_image\") {\n  return { ok: false, errorCode: \"INVALID_INPUT\", errorMessage: \"headline is required for image generation mode \" + mode };\n}\nif (!validModes.includes(mode)) {\n  return { ok: false, errorCode: \"INVALID_MODE\", errorMessage: \"mode must be one of: \" + validModes.join(\", \") };\n}\nif (mode === \"existing_drive_image\" && !driveFileId && (!$input.item.binary || !$input.item.binary.data)) {\n  return { ok: false, errorCode: \"DRIVE_FILE_MISSING\", errorMessage: \"driveFileId or binary input is required for existing_drive_image mode.\" };\n}\n\nreturn {\n  jobId,\n  assetKey,\n  assetType,\n  language,\n  mode,\n  headline,\n  subheadline: j.subheadline || \"\",\n  driveFileId,\n  brandConfig: j.brandConfig || { brandName: \"Mohamed Arslan\", primaryColor: \"#38bdf8\" },\n  ok: true\n};"
       },
       "id": "02810294-8172-491a-b812-701928301926",
       "name": "02 Validate Parameters",
@@ -74,7 +83,7 @@
         },
         "options": {}
       },
-      "id": "03820194-9128-4019-a829-109284019286",
+      "id": "03820194-9128-4019-a829-102938102986",
       "name": "03 Parameter OK Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
@@ -86,7 +95,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const p = $(\"02 Validate Parameters\").item.json;\nconst mode = p.mode;\nconst brand = escapeXml(p.brandName || \"Mohamed Arslan\");\n\nfunction escapeXml(str) {\n  if (!str) return \"\";\n  return String(str)\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\")\n    .replace(/\"/g, \"&quot;\")\n    .replace(/'/g, \"&apos;\");\n}\n\nfunction isRtl(text) {\n  return /[\\u0600-\\u06FF]/.test(text);\n}\n\nconst rawH = p.headline || \"\";\nconst rawSub = p.subheadline || \"\";\nconst rtlHeadline = isRtl(rawH);\nconst h = escapeXml(rawH);\nconst sub = escapeXml(rawSub);\nconst width = 1200;\nconst height = 630;\n\nlet svgContent = \"\";\nconst textDir = rtlHeadline ? 'direction=\"rtl\" text-anchor=\"end\"' : 'text-anchor=\"start\"';\nconst hX = rtlHeadline ? 1120 : 80;\nconst subX = rtlHeadline ? 1120 : 80;\nconst brandX = rtlHeadline ? 80 : 1120;\nconst brandAnchor = rtlHeadline ? 'text-anchor=\"start\"' : 'text-anchor=\"end\"';\n\nif (mode === \"existing_drive_image\") {\n  // Drive image mode with semi-transparent dark overlay and typography overlay\n  svgContent = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${width}\" height=\"${height}\" viewBox=\"0 0 ${width} ${height}\">\n  <rect width=\"100%\" height=\"100% fill=\"#0f172a\"/>\n  <rect width=\"100%\" height=\"100%\" fill=\"rgba(15,23,42,0.75)\"/>\n  <rect x=\"40\" y=\"40\" width=\"1120\" height=\"550\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"2\" rx=\"16\"/>\n  <text x=\"${hX}\" y=\"280\" fill=\"#ffffff\" font-family=\"sans-serif\" font-size=\"48\" font-weight=\"bold\" ${textDir}>${h}</text>\n  <text x=\"${subX}\" y=\"360\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"28\" ${textDir}>${sub}</text>\n  <text x=\"${brandX}\" y=\"100\" fill=\"#38bdf8\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"bold\" ${brandAnchor}>${brand}</text>\n</svg>`;\n} else if (mode === \"render_from_template\") {\n  // Premium template layout with brand badge box and horizontal separator\n  svgContent = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${width}\" height=\"${height}\" viewBox=\"0 0 ${width} ${height}\">\n  <defs>\n    <linearGradient id=\"cardGrad\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n      <stop offset=\"0%\" stop-color=\"#1e1b4b\"/>\n      <stop offset=\"100%\" stop-color=\"#0f172a\"/>\n    </linearGradient>\n  </defs>\n  <rect width=\"100%\" height=\"100%\" fill=\"url(#cardGrad)\"/>\n  <rect x=\"40\" y=\"40\" width=\"1120\" height=\"550\" fill=\"#1e293b\" fill-opacity=\"0.6\" stroke=\"#6366f1\" stroke-width=\"3\" rx=\"20\"/>\n  <rect x=\"${rtlHeadline ? 840 : 80}\" y=\"80\" width=\"240\" height=\"48\" fill=\"#6366f1\" rx=\"8\"/>\n  <text x=\"${rtlHeadline ? 960 : 200}\" y=\"112\" fill=\"#ffffff\" font-family=\"sans-serif\" font-size=\"18\" font-weight=\"bold\" text-anchor=\"middle\">${brand.toUpperCase()}</text>\n  <text x=\"${hX}\" y=\"260\" fill=\"#ffffff\" font-family=\"sans-serif\" font-size=\"52\" font-weight=\"bold\" ${textDir}>${h}</text>\n  <text x=\"${subX}\" y=\"340\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"28\" ${textDir}>${sub}</text>\n  <line x1=\"80\" y1=\"440\" x2=\"1120\" y2=\"440\" stroke=\"#334155\" stroke-width=\"2\"/>\n  <text x=\"${brandX}\" y=\"490\" fill=\"#818cf8\" font-family=\"sans-serif\" font-size=\"22\" ${brandAnchor}>Content Automation Engine</text>\n</svg>`;\n} else {\n  // Default: generate_background_and_render_text with gradient pattern\n  svgContent = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${width}\" height=\"${height}\" viewBox=\"0 0 ${width} ${height}\">\n  <defs>\n    <linearGradient id=\"bgGrad\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n      <stop offset=\"0%\" stop-color=\"#0f172a\"/>\n      <stop offset=\"50%\" stop-color=\"#1e293b\"/>\n      <stop offset=\"100%\" stop-color=\"#0369a1\"/>\n    </linearGradient>\n  </defs>\n  <rect width=\"100%\" height=\"100%\" fill=\"url(#bgGrad)\"/>\n  <rect x=\"60\" y=\"60\" width=\"1080\" height=\"510\" fill=\"none\" stroke=\"#0284c7\" stroke-width=\"4\" rx=\"16\"/>\n  <text x=\"${hX}\" y=\"270\" fill=\"#ffffff\" font-family=\"sans-serif\" font-size=\"48\" font-weight=\"bold\" ${textDir}>${h}</text>\n  <text x=\"${subX}\" y=\"350\" fill=\"#bae6fd\" font-family=\"sans-serif\" font-size=\"26\" ${textDir}>${sub}</text>\n  <text x=\"${brandX}\" y=\"120\" fill=\"#38bdf8\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"bold\" ${brandAnchor}>${brand}</text>\n</svg>`;\n}\n\nconst binaryBuffer = Buffer.from(svgContent, \"utf-8\");\nconst base64Data = binaryBuffer.toString(\"base64\");\n\nreturn {\n  json: {\n    jobId: p.jobId,\n    assetKey: \"featured-main\",\n    assetType: \"featured_image\",\n    generatorMode: mode,\n    width,\n    height,\n    fileSizeBytes: binaryBuffer.length,\n    mimeType: \"image/svg+xml\",\n    ok: true\n  },\n  binary: {\n    data: {\n      data: base64Data,\n      mimeType: \"image/svg+xml\",\n      fileName: \"featured-main.svg\",\n      fileExtension: \"svg\",\n      fileSize: `${binaryBuffer.length} B`\n    }\n  }\n};"
+        "jsCode": "const p = $(\"02 Validate Parameters\").item.json;\nconst mode = p.mode;\nconst brand = p.brandConfig || {};\nconst brandName = escapeXml(brand.brandName || \"Mohamed Arslan\");\nconst primaryColor = brand.primaryColor || \"#38bdf8\";\n\nfunction escapeXml(str) {\n  if (!str) return \"\";\n  return String(str)\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\")\n    .replace(/\"/g, \"&quot;\")\n    .replace(/'/g, \"&apos;\");\n}\n\nfunction wrapText(text, maxCharsPerLine = 35) {\n  if (!text) return [];\n  const words = text.split(/\\s+/);\n  const lines = [];\n  let currentLine = \"\";\n  for (const word of words) {\n    if ((currentLine + \" \" + word).trim().length <= maxCharsPerLine) {\n      currentLine = (currentLine + \" \" + word).trim();\n    } else {\n      if (currentLine) lines.push(currentLine);\n      currentLine = word;\n    }\n  }\n  if (currentLine) lines.push(currentLine);\n  return lines.slice(0, 3);\n}\n\nconst rawH = p.headline || \"\";\nconst rawSub = p.subheadline || \"\";\nconst isRtl = /[\\u0600-\\u06FF]/.test(rawH);\nconst hLines = wrapText(rawH, 30).map(escapeXml);\nconst subLines = wrapText(rawSub, 40).map(escapeXml);\nconst width = 1200;\nconst height = 630;\n\nconst textDir = isRtl ? 'direction=\"rtl\" text-anchor=\"end\"' : 'text-anchor=\"start\"';\nconst hX = isRtl ? 1120 : 80;\nconst subX = isRtl ? 1120 : 80;\nconst brandX = isRtl ? 80 : 1120;\nconst brandAnchor = isRtl ? 'text-anchor=\"start\"' : 'text-anchor=\"end\"';\n\nconst headlineSvgNodes = hLines.map((line, idx) => {\n  const y = 240 + idx * 56;\n  return `<text x=\"${hX}\" y=\"${y}\" fill=\"#ffffff\" font-family=\"sans-serif\" font-size=\"46\" font-weight=\"bold\" ${textDir}>${line}</text>`;\n}).join(\"\");\n\nconst sublineSvgNodes = subLines.map((line, idx) => {\n  const y = 240 + (hLines.length * 56) + 30 + idx * 36;\n  return `<text x=\"${subX}\" y=\"${y}\" fill=\"#cbd5e1\" font-family=\"sans-serif\" font-size=\"26\" ${textDir}>${line}</text>`;\n}).join(\"\");\n\nlet svgContent = \"\";\n\nif (mode === \"existing_drive_image\") {\n  svgContent = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${width}\" height=\"${height}\" viewBox=\"0 0 ${width} ${height}\">\n  <rect width=\"100%\" height=\"100%\" fill=\"#0f172a\"/>\n  <rect width=\"100%\" height=\"100%\" fill=\"rgba(15,23,42,0.80)\"/>\n  <rect x=\"40\" y=\"40\" width=\"1120\" height=\"550\" fill=\"none\" stroke=\"${primaryColor}\" stroke-width=\"2\" rx=\"16\"/>\n  <text x=\"${brandX}\" y=\"100\" fill=\"${primaryColor}\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"bold\" ${brandAnchor}>${brandName}</text>\n  ${headlineSvgNodes}\n  ${sublineSvgNodes}\n</svg>`;\n} else if (mode === \"render_from_template\") {\n  svgContent = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${width}\" height=\"${height}\" viewBox=\"0 0 ${width} ${height}\">\n  <defs>\n    <linearGradient id=\"cardGrad\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n      <stop offset=\"0%\" stop-color=\"#1e1b4b\"/>\n      <stop offset=\"100%\" stop-color=\"#0f172a\"/>\n    </linearGradient>\n  </defs>\n  <rect width=\"100%\" height=\"100%\" fill=\"url(#cardGrad)\"/>\n  <rect x=\"40\" y=\"40\" width=\"1120\" height=\"550\" fill=\"#1e293b\" fill-opacity=\"0.6\" stroke=\"${primaryColor}\" stroke-width=\"3\" rx=\"20\"/>\n  <rect x=\"${isRtl ? 840 : 80}\" y=\"80\" width=\"240\" height=\"48\" fill=\"${primaryColor}\" rx=\"8\"/>\n  <text x=\"${isRtl ? 960 : 200}\" y=\"112\" fill=\"#ffffff\" font-family=\"sans-serif\" font-size=\"18\" font-weight=\"bold\" text-anchor=\"middle\">${brandName.toUpperCase()}</text>\n  ${headlineSvgNodes}\n  ${sublineSvgNodes}\n  <line x1=\"80\" y1=\"520\" x2=\"1120\" y2=\"520\" stroke=\"#334155\" stroke-width=\"2\"/>\n</svg>`;\n} else {\n  svgContent = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${width}\" height=\"${height}\" viewBox=\"0 0 ${width} ${height}\">\n  <defs>\n    <linearGradient id=\"bgGrad\" x1=\"0%\" y1=\"0%\" x2=\"100%\" y2=\"100%\">\n      <stop offset=\"0%\" stop-color=\"#0f172a\"/>\n      <stop offset=\"50%\" stop-color=\"#1e293b\"/>\n      <stop offset=\"100%\" stop-color=\"#0369a1\"/>\n    </linearGradient>\n  </defs>\n  <rect width=\"100%\" height=\"100%\" fill=\"url(#bgGrad)\"/>\n  <rect x=\"60\" y=\"60\" width=\"1080\" height=\"510\" fill=\"none\" stroke=\"${primaryColor}\" stroke-width=\"4\" rx=\"16\"/>\n  <text x=\"${brandX}\" y=\"120\" fill=\"${primaryColor}\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"bold\" ${brandAnchor}>${brandName}</text>\n  ${headlineSvgNodes}\n  ${sublineSvgNodes}\n</svg>`;\n}\n\nconst binaryBuffer = Buffer.from(svgContent, \"utf-8\");\nconst base64Data = binaryBuffer.toString(\"base64\");\n\nreturn {\n  json: {\n    jobId: p.jobId,\n    assetKey: p.assetKey,\n    assetType: p.assetType,\n    language: p.language,\n    sourceMode: mode,\n    width,\n    height,\n    fileSizeBytes: binaryBuffer.length,\n    mimeType: \"image/svg+xml\",\n    checksum: \"\",\n    ok: true\n  },\n  binary: {\n    data: {\n      data: base64Data,\n      mimeType: \"image/svg+xml\",\n      fileName: `${p.assetKey}.svg`,\n      fileExtension: \"svg\",\n      fileSize: `${binaryBuffer.length} B`\n    }\n  }\n};"
       },
       "id": "04829104-9128-4902-8172-910293810297",
       "name": "04 Render SVG Featured Image Binary",
@@ -100,10 +109,10 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const item = $input.item;\nconst meta = item.json || {};\nconst hasBinary = item.binary && item.binary.data && item.binary.data.data;\n\nif (!hasBinary) {\n  return {\n    json: {\n      success: false,\n      jobId: meta.jobId || null,\n      status: \"FAILED\",\n      message: \"Featured image generation failed — no binary image output produced.\",\n      data: null,\n      warnings: [],\n      errors: [{ code: \"RENDER_FAILED\", language: null, path: null, message: \"Image renderer did not produce binary output data.\" }],\n      nextAllowedActions: [\"retry\", \"cancel\"]\n    },\n    binary: item.binary\n  };\n}\n\nconst norm = {\n  success: true,\n  jobId: meta.jobId,\n  status: \"ASSET_GENERATED\",\n  message: \"Featured image binary generated successfully using mode: \" + meta.generatorMode,\n  data: {\n    assetKey: meta.assetKey,\n    assetType: meta.assetType,\n    generatorMode: meta.generatorMode,\n    width: meta.width,\n    height: meta.height,\n    fileSizeBytes: meta.fileSizeBytes,\n    mimeType: meta.mimeType\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"optimize_images\"]\n};\n\nreturn {\n  json: norm,\n  binary: item.binary\n};"
+        "jsCode": "const item = $input.item;\nconst meta = item.json || {};\nconst hasBinary = item.binary && item.binary.data && item.binary.data.data;\n\nif (!hasBinary) {\n  return {\n    json: {\n      success: false,\n      jobId: meta.jobId || null,\n      assetKey: meta.assetKey || null,\n      assetType: meta.assetType || null,\n      status: \"FAILED\",\n      message: \"Featured image generation failed — no binary image output produced.\",\n      data: null,\n      warnings: [],\n      errors: [{ code: \"RENDER_FAILED\", language: null, path: null, message: \"Image renderer did not produce binary output data.\" }],\n      nextAllowedActions: [\"retry\", \"cancel\"]\n    },\n    binary: item.binary\n  };\n}\n\nconst norm = {\n  success: true,\n  jobId: meta.jobId,\n  status: \"ASSET_GENERATED\",\n  message: \"Featured image binary generated successfully using mode: \" + meta.sourceMode,\n  data: {\n    assetKey: meta.assetKey,\n    assetType: meta.assetType,\n    sourceMode: meta.sourceMode,\n    width: meta.width,\n    height: meta.height,\n    fileSizeBytes: meta.fileSizeBytes,\n    mimeType: meta.mimeType\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"optimize_images\"]\n};\n\nreturn {\n  json: {\n    jobId: meta.jobId,\n    assetKey: meta.assetKey,\n    assetType: meta.assetType,\n    language: meta.language,\n    sourceMode: meta.sourceMode,\n    width: meta.width,\n    height: meta.height,\n    fileSizeBytes: meta.fileSizeBytes,\n    checksum: meta.checksum,\n    mimeType: meta.mimeType,\n    normalized: norm\n  },\n  binary: item.binary\n};"
       },
       "id": "05820194-9128-4091-a829-102938102987",
-      "name": "05 Return Normalized Response",
+      "name": "05 Return Normalized Response and Envelope",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -114,7 +123,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"INVALID_INPUT\";\nconst message = j.errorMessage || \"Invalid input parameters for featured image generator.\";\nreturn {\n  json: {\n    success: false,\n    jobId: j.jobId || null,\n    status: \"FAILED\",\n    message,\n    data: null,\n    warnings: [],\n    errors: [{ code, language: null, path: null, message }],\n    nextAllowedActions: [\"cancel\"]\n  },\n  binary: $input.item ? $input.item.binary : undefined\n};"
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"INVALID_INPUT\";\nconst message = j.errorMessage || \"Invalid input parameters for featured image generator.\";\nreturn {\n  json: {\n    success: false,\n    jobId: j.jobId || null,\n    assetKey: j.assetKey || null,\n    assetType: j.assetType || null,\n    status: \"FAILED\",\n    message,\n    data: null,\n    warnings: [],\n    errors: [{ code, language: null, path: null, message }],\n    nextAllowedActions: [\"cancel\"]\n  },\n  binary: $input.item ? $input.item.binary : undefined\n};"
       },
       "id": "99820194-8172-4091-b812-701928301936",
       "name": "99 Build Error Response",
@@ -148,12 +157,18 @@
             },
             {
               "id": "a2",
+              "name": "assetKey",
+              "type": "string",
+              "value": "featured-main"
+            },
+            {
+              "id": "a3",
               "name": "mode",
               "type": "string",
               "value": "generate_background_and_render_text"
             },
             {
-              "id": "a3",
+              "id": "a4",
               "name": "headline",
               "type": "string",
               "value": "عنوان المقال المصور"
@@ -173,7 +188,7 @@
     },
     {
       "parameters": {
-        "content": "WF-06 Featured Image Generator\nRenders SVG featured image binary over 3 distinct modes with RTL handling & XML escaping. Preserves binary output and returns status ASSET_GENERATED.",
+        "content": "WF-06 Featured Image Generator\nRenders SVG featured image binary over 3 distinct modes with RTL wrapping & top-level envelope preservation. Returns status ASSET_GENERATED.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -234,7 +249,7 @@
       "main": [
         [
           {
-            "node": "05 Return Normalized Response",
+            "node": "05 Return Normalized Response and Envelope",
             "type": "main",
             "index": 0
           }

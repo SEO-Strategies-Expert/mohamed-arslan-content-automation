@@ -23,13 +23,13 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT c.job_id, c.site_key, c.status, c.manifest_file_id, c.drive_folder_id, c.target_languages FROM content_jobs c WHERE c.job_id = $1 LIMIT 1;",
+        "query": "SELECT c.job_id, c.site_key, c.status, c.manifest_file_id, c.drive_folder_id, c.target_languages, s.publishing_policy FROM content_jobs c LEFT JOIN site_configs s USING (site_key) WHERE c.job_id = $1 LIMIT 1;",
         "options": {
           "queryReplacement": "={{ $json.jobId }}"
         }
       },
       "id": "02810294-8172-491a-b812-701928301932",
-      "name": "02 Load Job Details",
+      "name": "02 Load Job Details and Policy",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
@@ -47,7 +47,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + input.jobId;\n} else {\n  const allowed = [\"CONTENT_READY\", \"ASSETS_PROCESSING\"];\n  if (!allowed.includes(String(row.status))) {\n    errorCode = \"INVALID_STATE\";\n    errorMessage = \"Prepare assets is only allowed from CONTENT_READY or ASSETS_PROCESSING. Current status: \" + row.status;\n  }\n}\nreturn { jobId: input.jobId, job: row, ok: errorCode === null, errorCode, errorMessage };"
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + input.jobId;\n} else {\n  const allowed = [\"CONTENT_READY\", \"ASSETS_PROCESSING\"];\n  if (!allowed.includes(String(row.status))) {\n    errorCode = \"INVALID_STATE\";\n    errorMessage = \"Prepare assets is only allowed from CONTENT_READY or ASSETS_PROCESSING. Current status: \" + row.status;\n  }\n}\nreturn { jobId: input.jobId, job: row, lockKey: \"ASSET-LOCK-\" + Date.now(), ok: errorCode === null, errorCode, errorMessage };"
       },
       "id": "02B10294-8172-491a-b812-701928301932",
       "name": "02B Check State Eligibility",
@@ -61,13 +61,13 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE content_jobs SET status = 'ASSETS_PROCESSING', updated_at = NOW() WHERE job_id = $1 AND status IN ('CONTENT_READY','ASSETS_PROCESSING') RETURNING job_id, status;",
+        "query": "UPDATE content_jobs SET lock_key = $2, lock_expires_at = NOW() + INTERVAL '5 minutes', status = 'ASSETS_PROCESSING', updated_at = NOW() WHERE job_id = $1 AND status IN ('CONTENT_READY','ASSETS_PROCESSING') AND (lock_expires_at IS NULL OR lock_expires_at < NOW() OR lock_key = $2) RETURNING job_id, lock_key, status;",
         "options": {
-          "queryReplacement": "={{ $json.jobId }}"
+          "queryReplacement": "={{ [$json.jobId, $json.lockKey] }}"
         }
       },
       "id": "03820194-9128-4091-a829-102938102969",
-      "name": "03 Acquire Lock and Set Status ASSETS_PROCESSING",
+      "name": "03 Acquire Idempotent Lock and Set Status ASSETS_PROCESSING",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
@@ -85,7 +85,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const locked = ($json && $json.job_id) ? true : false;\nconst base = $(\"02B Check State Eligibility\").item.json;\nif (!locked) {\n  return { ok: false, jobId: base.jobId, errorCode: base.errorCode || \"INVALID_STATE\", errorMessage: base.errorMessage || \"Could not acquire assets lock or invalid state.\" };\n}\nreturn { ok: true, jobId: base.jobId, job: base.job };"
+        "jsCode": "const locked = ($json && $json.job_id && $json.lock_key) ? true : false;\nconst base = $(\"02B Check State Eligibility\").item.json;\nif (!locked) {\n  return { ok: false, jobId: base.jobId, errorCode: base.errorCode || \"INVALID_STATE\", errorMessage: base.errorMessage || \"Could not acquire assets lock for job.\" };\n}\nreturn { ok: true, jobId: base.jobId, lockKey: base.lockKey, job: base.job };"
       },
       "id": "03B20194-9128-4091-a829-102938102969",
       "name": "03B Verify Lock Acquired",
@@ -160,7 +160,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const base = $(\"03B Verify Lock Acquired\").item.json;\nconst item = $input.item;\nlet manifest = {};\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    manifest = JSON.parse(Buffer.from(item.binary.data.data, \"base64\").toString(\"utf-8\"));\n  }\n} catch (e) {\n  manifest = {};\n}\n\nconst assetTasks = [];\nconst jobTitle = manifest.title || \"\";\nconst jobExcerpt = manifest.excerpt || \"\";\n\nif (manifest.assets) {\n  if (manifest.assets.featuredImage) {\n    const fi = manifest.assets.featuredImage;\n    assetTasks.push({\n      jobId: base.jobId,\n      assetKey: \"featured-main\",\n      assetType: \"featured_image\",\n      mode: fi.mode || \"generate_background_and_render_text\",\n      headline: fi.headline || jobTitle,\n      subheadline: fi.subheadline || jobExcerpt,\n      driveFileId: fi.driveFileId || null\n    });\n  }\n  if (Array.isArray(manifest.assets.infographics)) {\n    for (const ig of manifest.assets.infographics) {\n      if (ig && ig.key) {\n        assetTasks.push({\n          jobId: base.jobId,\n          assetKey: ig.key,\n          assetType: \"infographic\",\n          template: ig.template || \"cost-breakdown\",\n          title: ig.title || jobTitle,\n          data: ig.data || {}\n        });\n      }\n    }\n  }\n  if (manifest.assets.beforeAfter) {\n    const ba = manifest.assets.beforeAfter;\n    assetTasks.push({\n      jobId: base.jobId,\n      assetKey: ba.key || \"before-after-1\",\n      assetType: \"before_after\",\n      category: ba.category || \"general\"\n    });\n  }\n}\n\nif (assetTasks.length === 0) {\n  assetTasks.push({\n    jobId: base.jobId,\n    assetKey: \"featured-main\",\n    assetType: \"featured_image\",\n    mode: \"generate_background_and_render_text\",\n    headline: jobTitle || \"Article Asset\",\n    subheadline: jobExcerpt || \"\"\n  });\n}\n\nreturn assetTasks.map(task => ({ json: task }));"
+        "jsCode": "const base = $(\"03B Verify Lock Acquired\").item.json;\nconst item = $input.item;\nlet manifest = null;\nlet manifestError = null;\n\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    const rawStr = Buffer.from(item.binary.data.data, \"base64\").toString(\"utf-8\");\n    manifest = JSON.parse(rawStr);\n  } else {\n    manifestError = \"Manifest file binary data is missing.\";\n  }\n} catch (e) {\n  manifestError = \"Failed to parse job manifest JSON: \" + e.message;\n}\n\nif (!manifest || manifestError) {\n  return {\n    json: {\n      ok: false,\n      jobId: base.jobId,\n      lockKey: base.lockKey,\n      errorCode: \"INVALID_MANIFEST\",\n      errorMessage: manifestError || \"Job manifest file is missing or invalid.\"\n    }\n  };\n}\n\nconst assetTasks = [];\nconst jobTitle = manifest.title || \"\";\nconst jobExcerpt = manifest.excerpt || \"\";\nconst policy = (base.job && base.job.publishing_policy) || {};\n\nif (manifest.assets) {\n  if (manifest.assets.featuredImage) {\n    const fi = manifest.assets.featuredImage;\n    assetTasks.push({\n      jobId: base.jobId,\n      lockKey: base.lockKey,\n      assetKey: \"featured-main\",\n      assetType: \"featured_image\",\n      language: \"ar\",\n      mode: fi.mode || \"generate_background_and_render_text\",\n      headline: fi.headline || jobTitle,\n      subheadline: fi.subheadline || jobExcerpt,\n      driveFileId: fi.driveFileId || null,\n      ok: true\n    });\n  }\n  if (Array.isArray(manifest.assets.infographics)) {\n    for (const ig of manifest.assets.infographics) {\n      if (ig && ig.key) {\n        assetTasks.push({\n          jobId: base.jobId,\n          lockKey: base.lockKey,\n          assetKey: ig.key,\n          assetType: \"infographic\",\n          language: \"ar\",\n          template: ig.template || \"cost-breakdown\",\n          title: ig.title || jobTitle,\n          data: ig.data || {},\n          ok: true\n        });\n      }\n    }\n  }\n  if (manifest.assets.beforeAfter) {\n    const ba = manifest.assets.beforeAfter;\n    assetTasks.push({\n      jobId: base.jobId,\n      lockKey: base.lockKey,\n      assetKey: ba.key || \"before-after-1\",\n      assetType: \"before_after\",\n      language: \"ar\",\n      category: ba.category || \"general\",\n      ok: true\n    });\n  }\n}\n\n// If manifest specifies no assets and policy requires featured image\nif (assetTasks.length === 0 && policy.require_featured_image && jobTitle) {\n  assetTasks.push({\n    jobId: base.jobId,\n    lockKey: base.lockKey,\n    assetKey: \"featured-main\",\n    assetType: \"featured_image\",\n    language: \"ar\",\n    mode: \"generate_background_and_render_text\",\n    headline: jobTitle,\n    subheadline: jobExcerpt,\n    ok: true\n  });\n}\n\nif (assetTasks.length === 0) {\n  return [{\n    json: {\n      jobId: base.jobId,\n      lockKey: base.lockKey,\n      assetKey: null,\n      assetType: \"none\",\n      emptyAssets: true,\n      ok: true\n    }\n  }];\n}\n\nreturn assetTasks.map(task => ({ json: task }));"
       },
       "id": "05810294-8172-491a-b812-701928301934",
       "name": "05 Parse Manifest And Build Asset Tasks",
@@ -168,6 +168,40 @@
       "typeVersion": 2,
       "position": [
         1020,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "05B10294-8172-491a-b812-701928301934",
+      "name": "05B Manifest Valid Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1140,
         64
       ]
     },
@@ -253,7 +287,7 @@
       "type": "n8n-nodes-base.switch",
       "typeVersion": 3.4,
       "position": [
-        1240,
+        1260,
         64
       ]
     },
@@ -276,7 +310,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1460,
+        1480,
         -60
       ]
     },
@@ -299,7 +333,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1460,
+        1480,
         64
       ]
     },
@@ -322,7 +356,7 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1460,
+        1480,
         180
       ]
     },
@@ -345,8 +379,8 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1680,
-        64
+        1700,
+        0
       ]
     },
     {
@@ -368,21 +402,21 @@
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1900,
-        64
+        1920,
+        0
       ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const base = $(\"03B Verify Lock Acquired\").item.json;\nconst uploads = $input.all();\nconst errors = [];\nconst uploadedAssets = [];\n\nfor (const item of uploads) {\n  const j = item.json || {};\n  if (!j || j.success !== true) {\n    errors.push({\n      code: (j.errors && j.errors[0] && j.errors[0].code) || \"ASSET_PIPELINE_FAILED\",\n      message: (j.errors && j.errors[0] && j.errors[0].message) || j.message || \"Asset pipeline step failed for an item.\"\n    });\n  } else {\n    uploadedAssets.push(j.data);\n  }\n}\n\nconst passed = errors.length === 0 && uploads.length > 0;\nreturn {\n  json: {\n    jobId: base.jobId,\n    passed,\n    errors,\n    uploadedAssetsCount: uploadedAssets.length\n  }\n};"
+        "jsCode": "const tasks = $(\"05 Parse Manifest And Build Asset Tasks\").all();\nconst requiredAssetCount = tasks[0].json.emptyAssets ? 0 : tasks.length;\nconst requiredAssetKeys = tasks[0].json.emptyAssets ? [] : tasks.map(t => t.json.assetKey);\n\nconst uploaded = $(\"11 Execute WF-10 Upload Media\").all() || [];\nconst selected = $(\"09 Execute WF-08 Before-After Selector\").all() || [];\n\nconst completedAssetKeys = [];\nlet failedAssetCount = 0;\nconst errors = [];\n\nfor (const item of uploaded) {\n  const j = item.json || {};\n  if (j && (j.normalized ? j.normalized.success === true : j.success === true)) {\n    completedAssetKeys.push(j.assetKey);\n  } else {\n    failedAssetCount++;\n    errors.push({ code: \"UPLOAD_FAILED\", message: j.message || \"Asset upload failed.\" });\n  }\n}\n\nfor (const item of selected) {\n  const j = item.json || {};\n  if (j && (j.normalized ? j.normalized.success === true : j.success === true)) {\n    completedAssetKeys.push(j.assetKey);\n  } else {\n    failedAssetCount++;\n    errors.push({ code: \"SELECTION_FAILED\", message: j.message || \"Before-after selection failed.\" });\n  }\n}\n\nconst completedAssetCount = completedAssetKeys.length;\nconst passed = (requiredAssetCount === completedAssetCount) && (failedAssetCount === 0);\nconst base = $(\"03B Verify Lock Acquired\").item.json;\n\nreturn {\n  json: {\n    jobId: base.jobId,\n    lockKey: base.lockKey,\n    requiredAssetCount,\n    completedAssetCount,\n    failedAssetCount,\n    requiredAssetKeys,\n    completedAssetKeys,\n    passed,\n    errors\n  }\n};"
       },
       "id": "12820194-9128-4019-a829-109284019295",
-      "name": "12 Evaluate All Asset Upload Results",
+      "name": "12 Multi-Branch Asset Aggregator",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2120,
+        2140,
         64
       ]
     },
@@ -416,24 +450,24 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2340,
+        2360,
         64
       ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE content_jobs SET status = 'ASSETS_READY', updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
+        "query": "UPDATE content_jobs SET status = 'ASSETS_READY', lock_key = NULL, lock_expires_at = NULL, updated_at = NOW() WHERE job_id = $1 AND lock_key = $2 RETURNING job_id, status;",
         "options": {
-          "queryReplacement": "={{ [$json.jobId] }}"
+          "queryReplacement": "={{ [$json.jobId, $json.lockKey] }}"
         }
       },
       "id": "14820194-9128-4091-a829-102938102972",
-      "name": "14 Update Job Status ASSETS_READY",
+      "name": "14 Update Job Status ASSETS_READY and Release Lock",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2560,
+        2580,
         0
       ],
       "alwaysOutputData": true,
@@ -449,7 +483,7 @@
         "operation": "executeQuery",
         "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'ASSETS_READY', 'Mohamed Arslan — WF-05 Prepare Assets', $2, $3::jsonb);",
         "options": {
-          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ assetCount: $(\"12 Evaluate All Asset Upload Results\").item.json.uploadedAssetsCount })] }}"
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ assetCount: $(\"12 Multi-Branch Asset Aggregator\").item.json.completedAssetCount })] }}"
         }
       },
       "id": "15820194-9128-4091-a829-102938102973",
@@ -457,7 +491,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2780,
+        2800,
         0
       ],
       "alwaysOutputData": true,
@@ -471,31 +505,31 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const evalResult = $(\"12 Evaluate All Asset Upload Results\").item.json;\nreturn {\n  success: true,\n  jobId: evalResult.jobId,\n  status: \"ASSETS_READY\",\n  message: \"All required manifest assets generated, optimized, and uploaded successfully.\",\n  data: {\n    processedAssetsCount: evalResult.uploadedAssetsCount\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"create_preview\", \"cancel\"]\n};"
+        "jsCode": "const agg = $(\"12 Multi-Branch Asset Aggregator\").item.json;\nreturn {\n  success: true,\n  jobId: agg.jobId,\n  status: \"ASSETS_READY\",\n  message: \"All required manifest assets generated, optimized, and uploaded successfully.\",\n  data: {\n    completedAssetCount: agg.completedAssetCount,\n    requiredAssetCount: agg.requiredAssetCount,\n    completedAssetKeys: agg.completedAssetKeys\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"create_preview\", \"cancel\"]\n};"
       },
       "id": "16829104-9128-4902-8172-910293810306",
       "name": "16 Return Normalized Success Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        3000,
+        3020,
         0
       ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $2, updated_at = NOW() WHERE job_id = $1;",
+        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $3, lock_key = NULL, lock_expires_at = NULL, updated_at = NOW() WHERE job_id = $1 AND lock_key = $2;",
         "options": {
-          "queryReplacement": "={{ [$json.jobId, JSON.stringify($json.errors)] }}"
+          "queryReplacement": "={{ [$json.jobId, $json.lockKey, JSON.stringify($json.errors)] }}"
         }
       },
       "id": "17820194-9128-4091-a829-102938102974",
-      "name": "17 Set Status FAILED On Asset Error",
+      "name": "17 Set Status FAILED On Asset Error and Release Lock",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2560,
+        2580,
         240
       ],
       "alwaysOutputData": true,
@@ -509,14 +543,14 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const evalResult = $(\"12 Evaluate All Asset Upload Results\").item.json || $(\"02B Check State Eligibility\").item.json || $json || {};\nconst code = (evalResult.errors && evalResult.errors[0] && evalResult.errors[0].code) || evalResult.errorCode || \"ASSET_PIPELINE_FAILED\";\nconst message = (evalResult.errors && evalResult.errors[0] && evalResult.errors[0].message) || evalResult.errorMessage || \"Asset pipeline failed during execution.\";\nconst status = \"FAILED\";\nreturn {\n  success: false,\n  jobId: evalResult.jobId || null,\n  status,\n  message,\n  data: null,\n  warnings: [],\n  errors: evalResult.errors || [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+        "jsCode": "const res = $(\"12 Multi-Branch Asset Aggregator\").item.json || $(\"05 Parse Manifest And Build Asset Tasks\").item.json || $(\"02B Check State Eligibility\").item.json || $json || {};\nconst code = res.errorCode || (res.errors && res.errors[0] && res.errors[0].code) || \"ASSET_PIPELINE_FAILED\";\nconst message = res.errorMessage || (res.errors && res.errors[0] && res.errors[0].message) || \"Asset pipeline failed during execution.\";\nreturn {\n  success: false,\n  jobId: res.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: res.errors || [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
       },
       "id": "99820194-8172-4091-b812-701928301934",
       "name": "99 Build Error Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2780,
+        2800,
         240
       ]
     },
@@ -556,7 +590,7 @@
     },
     {
       "parameters": {
-        "content": "WF-05 Prepare Assets\nMulti-asset pipeline parsing manifest from Drive, routing featured images (WF-06), infographics (WF-07), before-after (WF-08) conditionally, optimizing each asset (WF-09), uploading (WF-10), and updating status to ASSETS_READY strictly when success === true.",
+        "content": "WF-05 Prepare Assets\nMulti-asset pipeline parsing manifest from Drive, acquiring DB lock, routing featured images (WF-06), infographics (WF-07), before-after (WF-08) conditionally, aggregating all asset branches, and setting ASSETS_READY strictly when completedAssetCount === requiredAssetCount.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -577,14 +611,14 @@
       "main": [
         [
           {
-            "node": "02 Load Job Details",
+            "node": "02 Load Job Details and Policy",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "02 Load Job Details": {
+    "02 Load Job Details and Policy": {
       "main": [
         [
           {
@@ -599,14 +633,14 @@
       "main": [
         [
           {
-            "node": "03 Acquire Lock and Set Status ASSETS_PROCESSING",
+            "node": "03 Acquire Idempotent Lock and Set Status ASSETS_PROCESSING",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "03 Acquire Lock and Set Status ASSETS_PROCESSING": {
+    "03 Acquire Idempotent Lock and Set Status ASSETS_PROCESSING": {
       "main": [
         [
           {
@@ -661,7 +695,25 @@
       "main": [
         [
           {
+            "node": "05B Manifest Valid Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05B Manifest Valid Check": {
+      "main": [
+        [
+          {
             "node": "06 Route By Asset Type",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "17 Set Status FAILED On Asset Error and Release Lock",
             "type": "main",
             "index": 0
           }
@@ -719,7 +771,7 @@
       "main": [
         [
           {
-            "node": "10 Execute WF-09 Optimize Images",
+            "node": "12 Multi-Branch Asset Aggregator",
             "type": "main",
             "index": 0
           }
@@ -741,14 +793,14 @@
       "main": [
         [
           {
-            "node": "12 Evaluate All Asset Upload Results",
+            "node": "12 Multi-Branch Asset Aggregator",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "12 Evaluate All Asset Upload Results": {
+    "12 Multi-Branch Asset Aggregator": {
       "main": [
         [
           {
@@ -763,21 +815,21 @@
       "main": [
         [
           {
-            "node": "14 Update Job Status ASSETS_READY",
+            "node": "14 Update Job Status ASSETS_READY and Release Lock",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "17 Set Status FAILED On Asset Error",
+            "node": "17 Set Status FAILED On Asset Error and Release Lock",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "14 Update Job Status ASSETS_READY": {
+    "14 Update Job Status ASSETS_READY and Release Lock": {
       "main": [
         [
           {
@@ -799,7 +851,7 @@
         ]
       ]
     },
-    "17 Set Status FAILED On Asset Error": {
+    "17 Set Status FAILED On Asset Error and Release Lock": {
       "main": [
         [
           {
@@ -825,7 +877,7 @@
       "main": [
         [
           {
-            "node": "02 Load Job Details",
+            "node": "02 Load Job Details and Policy",
             "type": "main",
             "index": 0
           }

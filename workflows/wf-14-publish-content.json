@@ -119,7 +119,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const row = ($json && $json.job_id) ? $json : null;\nconst base = $(\"03 Verify Eligibility\").item.json;\nif (!row || !row.lock_key) {\n  return {\n    ok: false,\n    jobId: base.jobId,\n    errorCode: \"PUBLISH_LOCKED\",\n    errorMessage: \"Could not acquire publish lock or job status is no longer APPROVED.\"\n  };\n}\nreturn {\n  ok: true,\n  jobId: base.jobId,\n  lockKey: row.lock_key,\n  contentId: row.content_id,\n  job: base.job\n};"
+        "jsCode": "const row = ($json && $json.job_id) ? $json : null;\nconst base = $(\"03 Verify Eligibility\").item.json;\nif (!row || !row.lock_key) {\n  return {\n    ok: false,\n    jobId: base.jobId,\n    lockKey: null,\n    errorCode: \"PUBLISH_LOCKED\",\n    errorMessage: \"Could not acquire publish lock or job status is no longer APPROVED.\"\n  };\n}\nreturn {\n  ok: true,\n  jobId: base.jobId,\n  lockKey: row.lock_key,\n  contentId: row.content_id,\n  job: base.job\n};"
       },
       "id": "05B0194-9128-4091-a829-102938102971",
       "name": "05B Verify Lock Acquired",
@@ -193,7 +193,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const lockCtx = $(\"05B Verify Lock Acquired\").item.json;\nconst resp = $json || {};\nconst statusCode = resp.statusCode || (resp.headers ? 200 : 0);\nconst body = resp.body !== undefined ? resp.body : resp;\nconst isSnapshotValid = (statusCode >= 200 && statusCode < 300) && body && typeof body === \"object\" && !body.error;\n\nif (!isSnapshotValid) {\n  return {\n    ok: false,\n    jobId: lockCtx.jobId,\n    lockKey: lockCtx.lockKey,\n    contentId: lockCtx.contentId,\n    errorCode: \"SNAPSHOT_FETCH_FAILED\",\n    errorMessage: \"Failed to fetch existing content snapshot from Custom Site API (HTTP \" + statusCode + \"). Cannot proceed with pre-publish revision snapshot.\"\n  };\n}\nreturn {\n  ok: true,\n  jobId: lockCtx.jobId,\n  lockKey: lockCtx.lockKey,\n  contentId: lockCtx.contentId,\n  snapshot: body\n};"
+        "jsCode": "const lockCtx = $(\"05B Verify Lock Acquired\").item.json;\nconst resp = $json || {};\nconst statusCode = typeof resp.statusCode === \"number\" ? resp.statusCode : 0;\nconst body = resp.body !== undefined ? resp.body : resp;\nconst isSnapshotValid = (statusCode >= 200 && statusCode < 300) && body && typeof body === \"object\" && !body.error;\n\nif (!isSnapshotValid) {\n  return {\n    ok: false,\n    jobId: lockCtx.jobId,\n    lockKey: lockCtx.lockKey,\n    contentId: lockCtx.contentId,\n    errorCode: \"SNAPSHOT_FETCH_FAILED\",\n    errorMessage: \"Failed to fetch existing content snapshot from Custom Site API (HTTP \" + statusCode + \"). Cannot proceed with pre-publish revision snapshot.\"\n  };\n}\nreturn {\n  ok: true,\n  jobId: lockCtx.jobId,\n  lockKey: lockCtx.lockKey,\n  contentId: lockCtx.contentId,\n  snapshot: body\n};"
       },
       "id": "06B0194-9128-4091-a829-102938102972",
       "name": "06B Validate Snapshot Response",
@@ -300,7 +300,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const lockCtx = $(\"05B Verify Lock Acquired\").item.json;\nconst resp = $json || {};\nconst statusCode = resp.statusCode || (resp.headers ? 200 : 0);\nconst body = resp.body !== undefined ? resp.body : resp;\nconst isSuccess = (statusCode >= 200 && statusCode < 300) && body && body.publishedUrls && typeof body.publishedUrls === \"object\" && Object.keys(body.publishedUrls).length > 0;\n\nif (!isSuccess) {\n  return {\n    ok: false,\n    jobId: lockCtx.jobId,\n    lockKey: lockCtx.lockKey,\n    contentId: lockCtx.contentId,\n    errorCode: \"PUBLISH_API_FAILED\",\n    errorMessage: (body && body.message) ? body.message : \"Custom Site API publish endpoint returned HTTP \" + statusCode + \" or invalid payload.\"\n  };\n}\n\nreturn {\n  ok: true,\n  jobId: lockCtx.jobId,\n  lockKey: lockCtx.lockKey,\n  contentId: body.contentId || lockCtx.contentId,\n  publishedUrls: body.publishedUrls\n};"
+        "jsCode": "const lockCtx = $(\"05B Verify Lock Acquired\").item.json;\nconst resp = $json || {};\nconst statusCode = typeof resp.statusCode === \"number\" ? resp.statusCode : 0;\nconst body = resp.body !== undefined ? resp.body : resp;\nconst isSuccess = (statusCode >= 200 && statusCode < 300) && body && body.publishedUrls && typeof body.publishedUrls === \"object\" && Object.keys(body.publishedUrls).length > 0;\n\nif (!isSuccess) {\n  return {\n    ok: false,\n    jobId: lockCtx.jobId,\n    lockKey: lockCtx.lockKey,\n    contentId: lockCtx.contentId,\n    errorCode: \"PUBLISH_API_FAILED\",\n    errorMessage: (body && body.message) ? body.message : \"Custom Site API publish endpoint returned HTTP \" + statusCode + \" or invalid payload.\"\n  };\n}\n\nreturn {\n  ok: true,\n  jobId: lockCtx.jobId,\n  lockKey: lockCtx.lockKey,\n  contentId: body.contentId || lockCtx.contentId,\n  publishedUrls: body.publishedUrls\n};"
       },
       "id": "09820194-9128-4019-a829-109284019296",
       "name": "09 Evaluate Publish API Response",
@@ -371,10 +371,24 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const row = ($json && $json.job_id) ? $json : null;\nconst p = $(\"09 Evaluate Publish API Response\").item.json;\nif (!row) {\n  return {\n    success: false,\n    jobId: p.jobId,\n    status: \"RECONCILIATION_REQUIRED\",\n    message: \"API published content successfully but database status update/lock release failed to return a row.\",\n    data: { contentId: p.contentId, publishedUrls: p.publishedUrls },\n    warnings: [{ code: \"DB_LOCK_RELEASE_FAILED\", message: \"Database status update failed after API published content.\" }],\n    errors: [{ code: \"RECONCILIATION_REQUIRED\", language: null, path: null, message: \"Database status update failed after API published content.\" }],\n    nextAllowedActions: [\"verify\", \"manual_reconcile\"]\n  };\n}\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"VERIFYING\",\n  message: \"Content published successfully to Custom Website API. Verification in progress.\",\n  data: {\n    contentId: p.contentId,\n    publishedUrls: p.publishedUrls\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"verify\", \"rollback\"]\n};"
+      },
+      "id": "12B29104-9128-4902-8172-910293810306",
+      "name": "12B Verify DB Update Returned Row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2560,
+        -60
+      ]
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'PUBLISHED_PENDING_VERIFICATION', 'Mohamed Arslan — WF-14 Publish Content', $2, $3::jsonb);",
         "options": {
-          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ contentId: $(\"09 Evaluate Publish API Response\").item.json.contentId, publishedUrls: $(\"09 Evaluate Publish API Response\").item.json.publishedUrls })] }}"
+          "queryReplacement": "={{ [$json.jobId, $execution.id, JSON.stringify($json.data)] }}"
         }
       },
       "id": "12820194-9128-4091-a829-102938102975",
@@ -382,7 +396,7 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2560,
+        2780,
         -60
       ],
       "alwaysOutputData": true,
@@ -396,15 +410,29 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const p = $(\"09 Evaluate Publish API Response\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"VERIFYING\",\n  message: \"Content published successfully to Custom Website API. Verification in progress.\",\n  data: {\n    contentId: p.contentId,\n    publishedUrls: p.publishedUrls\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"verify\", \"rollback\"]\n};"
+        "jsCode": "return $(\"12B Verify DB Update Returned Row\").item.json;"
       },
       "id": "13829104-9128-4902-8172-910293810306",
       "name": "13 Return Normalized Success Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2780,
+        3000,
         -60
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "let errCtx = null;\ntry {\n  errCtx = $(\"09 Evaluate Publish API Response\").item.json;\n} catch (e) {}\nif (!errCtx || errCtx.ok) {\n  try { errCtx = $(\"06B Validate Snapshot Response\").item.json; } catch (e) {}\n}\nif (!errCtx || errCtx.ok) {\n  try { errCtx = $(\"05B Verify Lock Acquired\").item.json; } catch (e) {}\n}\nif (!errCtx || errCtx.ok) {\n  try { errCtx = $(\"03 Verify Eligibility\").item.json; } catch (e) {}\n}\nconst jobId = (errCtx && errCtx.jobId) ? errCtx.jobId : null;\nconst lockKey = (errCtx && errCtx.lockKey) ? errCtx.lockKey : null;\nconst errorCode = (errCtx && errCtx.errorCode) ? errCtx.errorCode : \"PUBLISH_ERROR\";\nconst errorMessage = (errCtx && errCtx.errorMessage) ? errCtx.errorMessage : \"An error occurred while publishing content.\";\nreturn {\n  jobId,\n  lockKey,\n  errorCode,\n  errorMessage\n};"
+      },
+      "id": "13B820194-9128-4091-a829-102938102976",
+      "name": "13B Format Explicit Error Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2120,
+        180
       ]
     },
     {
@@ -458,7 +486,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const res = $(\"09 Evaluate Publish API Response\").item.json || $(\"06B Validate Snapshot Response\").item.json || $(\"05B Verify Lock Acquired\").item.json || $json || {};\nconst code = res.errorCode || \"PUBLISH_ERROR\";\nconst message = res.errorMessage || \"An error occurred while publishing content.\";\nconst jobId = res.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+        "jsCode": "const errCtx = $(\"13B Format Explicit Error Context\").item.json;\nreturn {\n  success: false,\n  jobId: errCtx.jobId,\n  status: \"FAILED\",\n  message: errCtx.errorMessage,\n  data: null,\n  warnings: [],\n  errors: [{ code: errCtx.errorCode, language: null, path: null, message: errCtx.errorMessage }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
       },
       "id": "99820194-8172-4091-b812-701928301934",
       "name": "99 Build Error Response",
@@ -505,7 +533,7 @@
     },
     {
       "parameters": {
-        "content": "WF-14 Publish Content\nEnforces non-empty content_id, acquires DB lock with lock_key/lock_expires_at verified by IF node (05C), fetches GET snapshot with statusCode validation, calls POST /content/{contentId}/publish with fullResponse, logs errors, releases lock with WHERE job_id=$1 AND lock_key=$2.",
+        "content": "WF-14 Publish Content\nEnforces non-empty content_id, acquires DB lock with lock_key/lock_expires_at verified by IF node (05C), fetches GET snapshot with numeric statusCode validation, calls POST /content/{contentId}/publish with fullResponse, logs errors, releases lock with WHERE job_id=$1 AND lock_key=$2, and returns RECONCILIATION_REQUIRED if DB update fails post-publish.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -566,7 +594,7 @@
         ],
         [
           {
-            "node": "99 Build Error Response",
+            "node": "13B Format Explicit Error Context",
             "type": "main",
             "index": 0
           }
@@ -606,7 +634,7 @@
         ],
         [
           {
-            "node": "99 Build Error Response",
+            "node": "13B Format Explicit Error Context",
             "type": "main",
             "index": 0
           }
@@ -646,7 +674,7 @@
         ],
         [
           {
-            "node": "14 Set Status FAILED and Release Scoped Lock",
+            "node": "13B Format Explicit Error Context",
             "type": "main",
             "index": 0
           }
@@ -697,7 +725,7 @@
         ],
         [
           {
-            "node": "14 Set Status FAILED and Release Scoped Lock",
+            "node": "13B Format Explicit Error Context",
             "type": "main",
             "index": 0
           }
@@ -705,6 +733,17 @@
       ]
     },
     "11 Update Status VERIFYING and Release Scoped Lock": {
+      "main": [
+        [
+          {
+            "node": "12B Verify DB Update Returned Row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12B Verify DB Update Returned Row": {
       "main": [
         [
           {
@@ -720,6 +759,17 @@
         [
           {
             "node": "13 Return Normalized Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "13B Format Explicit Error Context": {
+      "main": [
+        [
+          {
+            "node": "14 Set Status FAILED and Release Scoped Lock",
             "type": "main",
             "index": 0
           }

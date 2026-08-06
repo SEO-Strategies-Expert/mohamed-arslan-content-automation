@@ -22,7 +22,7 @@ if (files.length === 0) {
 let hasError = false;
 let totalChecked = 0;
 
-console.log(`Starting strict functional blocker validation of ${files.length} workflow files in workflows/...`);
+console.log(`Starting comprehensive production validation of ${files.length} workflow files in workflows/...`);
 
 const EXPECTED_PREFIX = 'Mohamed Arslan';
 const FORBIDDEN_WORDS = ['wisal', 'Wisal', 'WISAL'];
@@ -64,7 +64,6 @@ const FALLBACK_SUCCESS_PATTERNS = [
   /sitemapUpdated:\s*apiResp\.sitemapUpdated\s*!==\s*undefined\s*\?\s*apiResp\.sitemapUpdated\s*:\s*true/
 ];
 
-// Anti-patterns for Publish contentId fallbacks
 const PUBLISH_FALLBACK_PATTERNS = [
   /content_id\s*\|\|\s*.*job_id/i,
   /contentId\s*\|\|\s*.*jobId/i,
@@ -72,6 +71,11 @@ const PUBLISH_FALLBACK_PATTERNS = [
   /\/content\/\$\{[^}]*jobId\}/i,
   /\/content\/\{\{[^}]*job_id\}\}\/publish/i,
   /\/content\/\{\{[^}]*jobId\}\}\/publish/i
+];
+
+const ALL_EIGHT_TEMPLATES = [
+  'stats-grid', 'process-steps', 'comparison', 'timeline',
+  'checklist', 'cost-breakdown', 'before-after-explanation', 'faq-summary'
 ];
 
 for (const file of files) {
@@ -124,16 +128,22 @@ for (const file of files) {
     }
   }
 
-  // 6. Check for contentId fallback to jobId in WF-14 or publish endpoints
+  // 6. WF-14 checks: contentId fallbacks & lock key release scoping
   if (file === 'wf-14-publish-content.json') {
     for (const pattern of PUBLISH_FALLBACK_PATTERNS) {
       if (pattern.test(content)) {
         fileErrors.push(`WF-14 contains invalid contentId fallback pattern matching ${pattern}`);
       }
     }
+    if (!content.includes('WHERE job_id = $1 AND lock_key = $2')) {
+      fileErrors.push('WF-14 lock release queries MUST match lock_key using WHERE job_id = $1 AND lock_key = $2!');
+    }
+    if (!content.includes('05C Lock Acquired Check')) {
+      fileErrors.push('WF-14 lock verification node must be followed immediately by an IF branch node (05C Lock Acquired Check)!');
+    }
   }
 
-  // 7. Check WF-05 for hardcoded READY asset arrays or missing execute workflow nodes
+  // 7. WF-05 checks: no fixed titles/templates in production JS code, must include conditional WF-08
   if (file === 'wf-05-prepare-assets.json') {
     if (content.includes('processedAssets = [') || content.includes('processedAssets: [')) {
       fileErrors.push('WF-05 contains hardcoded processedAssets array!');
@@ -141,9 +151,38 @@ for (const file of files) {
     if (!content.includes('n8n-nodes-base.executeWorkflow')) {
       fileErrors.push('WF-05 is missing executeWorkflow nodes for child workflows!');
     }
+    if (!content.includes('WF-08 Before-After Selector')) {
+      fileErrors.push('WF-05 is missing conditional WF-08 Before-After Selector execution!');
+    }
   }
 
-  // 8. JSON Parse Check
+  // 8. WF-07 checks: all 8 templates must have distinct render logic
+  if (file === 'wf-07-infographic-renderer.json') {
+    for (const tmpl of ALL_EIGHT_TEMPLATES) {
+      if (!content.includes(tmpl)) {
+        fileErrors.push(`WF-07 is missing rendering logic for required template '${tmpl}'!`);
+      }
+    }
+  }
+
+  // 9. WF-10 checks: binary multipart upload & ON CONFLICT (job_id, asset_key)
+  if (file === 'wf-10-upload-media.json') {
+    if (!content.includes('binaryPropertyName') && !content.includes('contentType')) {
+      fileErrors.push('WF-10 is missing binary payload configuration for HTTP upload!');
+    }
+    if (!content.includes('ON CONFLICT (job_id, asset_key)')) {
+      fileErrors.push('WF-10 must use ON CONFLICT (job_id, asset_key) for database idempotency!');
+    }
+  }
+
+  // 10. Database Schema checks (00-automation-db-setup.json)
+  if (file === '00-automation-db-setup.json') {
+    if (content.includes('asset_key VARCHAR(160) UNIQUE')) {
+      fileErrors.push('media_assets must not use global UNIQUE on asset_key alone; must use UNIQUE(job_id, asset_key)!');
+    }
+  }
+
+  // 11. JSON Parse Check
   let workflow = null;
   try {
     workflow = JSON.parse(content);
@@ -152,17 +191,17 @@ for (const file of files) {
   }
 
   if (workflow) {
-    // 9. Workflow Name check
+    // 12. Workflow Name check
     if (!workflow.name || !workflow.name.startsWith(EXPECTED_PREFIX)) {
       fileErrors.push(`Workflow name '${workflow.name}' does not start with '${EXPECTED_PREFIX}'`);
     }
 
-    // 10. Active state check
+    // 13. Active state check
     if (workflow.active !== false) {
       fileErrors.push(`Workflow active state is ${workflow.active}, expected false`);
     }
 
-    // 11. Node validation
+    // 14. Node validation
     if (!Array.isArray(workflow.nodes)) {
       fileErrors.push('Workflow missing nodes array');
     } else {
@@ -180,7 +219,7 @@ for (const file of files) {
         nodeNames.add(node.name);
 
         // Binary preservation check on asset response nodes
-        if (['wf-06-featured-image-generator.json', 'wf-07-infographic-renderer', 'wf-09-optimize-images.json'].includes(file)) {
+        if (['wf-06-featured-image-generator.json', 'wf-07-infographic-renderer.json', 'wf-09-optimize-images.json', 'wf-10-upload-media.json'].includes(file)) {
           if (node.name.includes('Return') || node.name.includes('Response')) {
             const jsCode = (node.parameters && node.parameters.jsCode) ? node.parameters.jsCode : '';
             if (jsCode.includes('return {') && !jsCode.includes('binary') && !jsCode.includes('item.binary')) {
@@ -211,7 +250,7 @@ for (const file of files) {
         }
       }
 
-      // 12. Connection target existence check
+      // 15. Connection target existence check
       if (workflow.connections && typeof workflow.connections === 'object') {
         for (const sourceNode in workflow.connections) {
           if (!nodeNames.has(sourceNode)) {
@@ -235,7 +274,7 @@ for (const file of files) {
         }
       }
 
-      // 13. Response normalization check in response code nodes
+      // 16. Response normalization check in response code nodes
       const responseNodes = workflow.nodes.filter(n =>
         n.name.includes('Response') || n.name.includes('Normalize') || n.name.includes('Return')
       );
@@ -260,7 +299,7 @@ for (const file of files) {
     hasError = true;
     console.error(`❌ [${file}] Validation failed:\n   - ${fileErrors.join('\n   - ')}`);
   } else {
-    console.log(`✅ [${file}] Passed strict functional validation`);
+    console.log(`✅ [${file}] Passed production validation`);
   }
 }
 
@@ -269,6 +308,6 @@ if (hasError) {
   console.error(`FAILED: Validation failed for one or more files.`);
   process.exit(1);
 } else {
-  console.log(`SUCCESS: All ${totalChecked} workflow files passed strict functional validation cleanly.`);
+  console.log(`SUCCESS: All ${totalChecked} workflow files passed comprehensive production validation cleanly.`);
   process.exit(0);
 }

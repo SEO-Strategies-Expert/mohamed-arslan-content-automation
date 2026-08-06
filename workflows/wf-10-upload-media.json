@@ -15,9 +15,6 @@
               "name": "assetType"
             },
             {
-              "name": "sourceUrl"
-            },
-            {
               "name": "language"
             }
           ]
@@ -58,22 +55,87 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\nconst input = item.json || {};\nconst jobRow = ($json && $json.job_id) ? $json : null;\nconst binaryObj = item.binary && item.binary.data ? item.binary.data : null;\n\nlet errorCode = null;\nlet errorMessage = null;\n\nif (!jobRow) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No job record found for jobId \" + input.jobId;\n} else if (!jobRow.api_base_url) {\n  errorCode = \"SITE_CONFIG_MISSING\";\n  errorMessage = \"site_configs api_base_url is missing for site_key \" + jobRow.site_key;\n} else if (!binaryObj || !binaryObj.data) {\n  errorCode = \"MISSING_BINARY_DATA\";\n  errorMessage = \"No binary image input supplied for media upload.\";\n}\n\nreturn {\n  json: {\n    jobId: input.jobId,\n    assetKey: input.assetKey || \"featured-main\",\n    assetType: input.assetType || \"featured_image\",\n    language: input.language || null,\n    apiBaseUrl: jobRow ? jobRow.api_base_url : null,\n    ok: errorCode === null,\n    errorCode,\n    errorMessage\n  },\n  binary: item.binary\n};"
+      },
+      "id": "02B10294-8172-491a-b812-701928301930",
+      "name": "02B Validate Pre-Upload Requirements",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        330,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "02C10294-8172-491a-b812-701928301930",
+      "name": "02C Input OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        438,
+        192
+      ]
+    },
+    {
+      "parameters": {
         "method": "POST",
-        "url": "={{ $json.api_base_url }}/media",
+        "url": "={{ $json.apiBaseUrl }}/media",
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ jobId: $(\"01 Input Trigger\").item.json.jobId, assetKey: $(\"01 Input Trigger\").item.json.assetKey, assetType: $(\"01 Input Trigger\").item.json.assetType, sourceUrl: $(\"01 Input Trigger\").item.json.sourceUrl, language: $(\"01 Input Trigger\").item.json.language }) }}",
+        "contentType": "binaryData",
+        "binaryPropertyName": "data",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Job-Id",
+              "value": "={{ $json.jobId }}"
+            },
+            {
+              "name": "X-Asset-Key",
+              "value": "={{ $json.assetKey }}"
+            },
+            {
+              "name": "X-Asset-Type",
+              "value": "={{ $json.assetType }}"
+            }
+          ]
+        },
         "options": {
-          "timeout": 5000
+          "timeout": 10000
         }
       },
       "id": "03810294-8172-491a-b812-701928301931",
-      "name": "03 Upload To Custom Site API Adapter",
+      "name": "03 Upload Binary To Custom Site API Adapter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        448,
-        192
+        560,
+        128
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -87,15 +149,15 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst resp = $json || {};\nconst isSuccess = resp && resp.mediaId && resp.finalUrl;\n\nif (!isSuccess) {\n  return {\n    ok: false,\n    jobId: input.jobId,\n    errorCode: \"MEDIA_UPLOAD_FAILED\",\n    errorMessage: (resp && resp.message) ? resp.message : \"Custom Site API media upload failed or returned invalid response.\"\n  };\n}\n\nreturn {\n  ok: true,\n  jobId: input.jobId,\n  assetKey: input.assetKey || \"featured-main\",\n  assetType: input.assetType || \"featured_image\",\n  sourceUrl: input.sourceUrl || null,\n  finalUrl: resp.finalUrl,\n  mediaId: resp.mediaId,\n  language: input.language || null,\n  width: resp.width || null,\n  height: resp.height || null,\n  fileSizeBytes: resp.fileSizeBytes || null,\n  mimeType: resp.mimeType || \"image/webp\",\n  checksum: resp.checksum || null,\n  approvalStatus: \"approved\"\n};"
+        "jsCode": "const item = $input.item;\nconst prev = $(\"02B Validate Pre-Upload Requirements\").item.json;\nconst resp = $json || {};\nconst isSuccess = !resp.error && resp.mediaId && resp.finalUrl;\n\nif (!isSuccess) {\n  return {\n    json: {\n      ok: false,\n      jobId: prev.jobId,\n      errorCode: \"MEDIA_UPLOAD_FAILED\",\n      errorMessage: (resp && resp.message) ? resp.message : \"Custom Site API media binary upload failed or returned invalid response.\"\n    },\n    binary: item.binary\n  };\n}\n\nreturn {\n  json: {\n    ok: true,\n    jobId: prev.jobId,\n    assetKey: prev.assetKey,\n    assetType: prev.assetType,\n    finalUrl: resp.finalUrl,\n    mediaId: resp.mediaId,\n    language: prev.language,\n    width: resp.width || null,\n    height: resp.height || null,\n    fileSizeBytes: resp.fileSizeBytes || null,\n    mimeType: resp.mimeType || \"image/webp\",\n    checksum: resp.checksum || null,\n    approvalStatus: \"approved\"\n  },\n  binary: item.binary\n};"
       },
       "id": "04820194-9128-4019-a829-109284019290",
       "name": "04 Evaluate Media Upload Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        672,
-        192
+        780,
+        128
       ]
     },
     {
@@ -128,16 +190,16 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        896,
-        192
+        1000,
+        128
       ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO media_assets (job_id, asset_key, asset_type, source_url, final_url, media_id, language, width, height, file_size_bytes, mime_type, checksum, approval_status)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\nON CONFLICT (asset_key) DO UPDATE SET final_url = EXCLUDED.final_url, media_id = EXCLUDED.media_id, approval_status = EXCLUDED.approval_status\nRETURNING id, asset_key, media_id;",
+        "query": "INSERT INTO media_assets (job_id, asset_key, asset_type, final_url, media_id, language, width, height, file_size_bytes, mime_type, checksum, approval_status)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\nON CONFLICT (job_id, asset_key) DO UPDATE SET final_url = EXCLUDED.final_url, media_id = EXCLUDED.media_id, approval_status = EXCLUDED.approval_status, file_size_bytes = EXCLUDED.file_size_bytes, checksum = EXCLUDED.checksum\nRETURNING id, asset_key, media_id;",
         "options": {
-          "queryReplacement": "={{ [$json.jobId, $json.assetKey, $json.assetType, $json.sourceUrl, $json.finalUrl, $json.mediaId, $json.language, $json.width, $json.height, $json.fileSizeBytes, $json.mimeType, $json.checksum, $json.approvalStatus] }}"
+          "queryReplacement": "={{ [$json.jobId, $json.assetKey, $json.assetType, $json.finalUrl, $json.mediaId, $json.language, $json.width, $json.height, $json.fileSizeBytes, $json.mimeType, $json.checksum, $json.approvalStatus] }}"
         }
       },
       "id": "06820194-9128-4091-a829-102938102963",
@@ -145,8 +207,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        1120,
-        128
+        1220,
+        64
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -159,29 +221,29 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const m = $(\"04 Evaluate Media Upload Result\").item.json;\nreturn {\n  success: true,\n  jobId: m.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Media asset uploaded and registered in database successfully.\",\n  data: {\n    assetKey: m.assetKey,\n    mediaId: m.mediaId,\n    finalUrl: m.finalUrl\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"create_preview\"]\n};"
+        "jsCode": "const item = $input.item;\nconst m = $(\"04 Evaluate Media Upload Result\").item.json;\nconst norm = {\n  success: true,\n  jobId: m.jobId,\n  status: \"ASSET_UPLOADED\",\n  message: \"Media asset binary uploaded to Custom Site API and registered in database successfully.\",\n  data: {\n    assetKey: m.assetKey,\n    mediaId: m.mediaId,\n    finalUrl: m.finalUrl,\n    width: m.width,\n    height: m.height,\n    fileSizeBytes: m.fileSizeBytes,\n    mimeType: m.mimeType,\n    checksum: m.checksum\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"create_preview\"]\n};\nreturn {\n  json: norm,\n  binary: item.binary\n};"
       },
       "id": "07829104-9128-4902-8172-910293810300",
       "name": "07 Return Normalized Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1344,
-        128
+        1440,
+        64
       ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"MEDIA_UPLOAD_FAILED\";\nconst message = j.errorMessage || \"Custom Site API media upload failed.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"MEDIA_UPLOAD_FAILED\";\nconst message = j.errorMessage || \"Custom Site API media upload failed.\";\nreturn {\n  json: {\n    success: false,\n    jobId: j.jobId || null,\n    status: \"FAILED\",\n    message,\n    data: null,\n    warnings: [],\n    errors: [{ code, language: null, path: null, message }],\n    nextAllowedActions: [\"retry\", \"cancel\"]\n  },\n  binary: $input.item ? $input.item.binary : undefined\n};"
       },
       "id": "99820194-8172-4091-b812-701928301939",
       "name": "99 Build Error Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
-        352
+        1220,
+        280
       ]
     },
     {
@@ -232,7 +294,7 @@
     },
     {
       "parameters": {
-        "content": "WF-10 Upload Media\nUploads asset to Custom Website API POST /api/automation/v1/media (loaded from site_configs) and records media details into media_assets table.",
+        "content": "WF-10 Upload Media\nUploads actual binary image to Custom Website API POST /api/automation/v1/media via binaryData payload and registers metadata in media_assets ON CONFLICT (job_id, asset_key). Returns ASSET_UPLOADED.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -264,14 +326,43 @@
       "main": [
         [
           {
-            "node": "03 Upload To Custom Site API Adapter",
+            "node": "02B Validate Pre-Upload Requirements",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "03 Upload To Custom Site API Adapter": {
+    "02B Validate Pre-Upload Requirements": {
+      "main": [
+        [
+          {
+            "node": "02C Input OK Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02C Input OK Check": {
+      "main": [
+        [
+          {
+            "node": "03 Upload Binary To Custom Site API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Upload Binary To Custom Site API Adapter": {
       "main": [
         [
           {

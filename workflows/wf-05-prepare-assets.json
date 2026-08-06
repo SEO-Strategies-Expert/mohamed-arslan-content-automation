@@ -23,7 +23,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT c.job_id, c.site_key, c.status, c.manifest_file_id, c.target_languages FROM content_jobs c WHERE c.job_id = $1 LIMIT 1;",
+        "query": "SELECT c.job_id, c.site_key, c.status, c.manifest_file_id, c.drive_folder_id, c.target_languages FROM content_jobs c WHERE c.job_id = $1 LIMIT 1;",
         "options": {
           "queryReplacement": "={{ $json.jobId }}"
         }
@@ -46,19 +46,33 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + input.jobId;\n} else {\n  const allowed = [\"CONTENT_READY\", \"ASSETS_PROCESSING\"];\n  if (!allowed.includes(String(row.status))) {\n    errorCode = \"INVALID_STATE\";\n    errorMessage = \"Prepare assets is only allowed from CONTENT_READY or ASSETS_PROCESSING. Current status: \" + row.status;\n  }\n}\nreturn { jobId: input.jobId, job: row, ok: errorCode === null, errorCode, errorMessage };"
+      },
+      "id": "02B10294-8172-491a-b812-701928301932",
+      "name": "02B Check State Eligibility",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        192
+      ]
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE content_jobs SET status = 'ASSETS_PROCESSING', updated_at = NOW() WHERE job_id = $1 AND status IN ('CONTENT_READY','VALIDATION_FAILED','ASSETS_PROCESSING') RETURNING job_id, status;",
+        "query": "UPDATE content_jobs SET status = 'ASSETS_PROCESSING', updated_at = NOW() WHERE job_id = $1 AND status IN ('CONTENT_READY','ASSETS_PROCESSING') RETURNING job_id, status;",
         "options": {
           "queryReplacement": "={{ $json.jobId }}"
         }
       },
       "id": "03820194-9128-4091-a829-102938102969",
-      "name": "03 Set Status ASSETS_PROCESSING",
+      "name": "03 Acquire Lock and Set Status ASSETS_PROCESSING",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        448,
-        192
+        460,
+        128
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -70,6 +84,181 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const locked = ($json && $json.job_id) ? true : false;\nconst base = $(\"02B Check State Eligibility\").item.json;\nif (!locked) {\n  return { ok: false, jobId: base.jobId, errorCode: base.errorCode || \"INVALID_STATE\", errorMessage: base.errorMessage || \"Could not acquire assets lock or invalid state.\" };\n}\nreturn { ok: true, jobId: base.jobId, job: base.job };"
+      },
+      "id": "03B20194-9128-4091-a829-102938102969",
+      "name": "03B Verify Lock Acquired",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        570,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "03C20194-9128-4091-a829-102938102969",
+      "name": "03C Lock OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.job.manifest_file_id }}"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "04810294-8172-491a-b812-701928301933",
+      "name": "04 Download Manifest From Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        800,
+        64
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const base = $(\"03B Verify Lock Acquired\").item.json;\nconst item = $input.item;\nlet manifest = {};\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    manifest = JSON.parse(Buffer.from(item.binary.data.data, \"base64\").toString(\"utf-8\"));\n  }\n} catch (e) {\n  manifest = {};\n}\n\nconst assetTasks = [];\nconst jobTitle = manifest.title || \"\";\nconst jobExcerpt = manifest.excerpt || \"\";\n\nif (manifest.assets) {\n  if (manifest.assets.featuredImage) {\n    const fi = manifest.assets.featuredImage;\n    assetTasks.push({\n      jobId: base.jobId,\n      assetKey: \"featured-main\",\n      assetType: \"featured_image\",\n      mode: fi.mode || \"generate_background_and_render_text\",\n      headline: fi.headline || jobTitle,\n      subheadline: fi.subheadline || jobExcerpt,\n      driveFileId: fi.driveFileId || null\n    });\n  }\n  if (Array.isArray(manifest.assets.infographics)) {\n    for (const ig of manifest.assets.infographics) {\n      if (ig && ig.key) {\n        assetTasks.push({\n          jobId: base.jobId,\n          assetKey: ig.key,\n          assetType: \"infographic\",\n          template: ig.template || \"cost-breakdown\",\n          title: ig.title || jobTitle,\n          data: ig.data || {}\n        });\n      }\n    }\n  }\n  if (manifest.assets.beforeAfter) {\n    const ba = manifest.assets.beforeAfter;\n    assetTasks.push({\n      jobId: base.jobId,\n      assetKey: ba.key || \"before-after-1\",\n      assetType: \"before_after\",\n      category: ba.category || \"general\"\n    });\n  }\n}\n\nif (assetTasks.length === 0) {\n  assetTasks.push({\n    jobId: base.jobId,\n    assetKey: \"featured-main\",\n    assetType: \"featured_image\",\n    mode: \"generate_background_and_render_text\",\n    headline: jobTitle || \"Article Asset\",\n    subheadline: jobExcerpt || \"\"\n  });\n}\n\nreturn assetTasks.map(task => ({ json: task }));"
+      },
+      "id": "05810294-8172-491a-b812-701928301934",
+      "name": "05 Parse Manifest And Build Asset Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.assetType }}",
+                    "rightValue": "featured_image",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "featured_image"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.assetType }}",
+                    "rightValue": "infographic",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "infographic"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.assetType }}",
+                    "rightValue": "before_after",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "before_after"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "06810294-8172-491a-b812-701928301935",
+      "name": "06 Route By Asset Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1240,
+        64
+      ]
+    },
+    {
+      "parameters": {
         "workflowId": {
           "__rl": true,
           "mode": "name",
@@ -77,23 +266,18 @@
           "cachedResultName": "Mohamed Arslan — WF-06 Featured Image Generator"
         },
         "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "jobId": "={{ $(\"01 Input Trigger\").item.json.jobId }}",
-            "mode": "generate_background_and_render_text",
-            "headline": "تكلفة زراعة الشعر في تركيا 2026",
-            "subheadline": "دليل شامل للأسعار والتقنيات والنصائح"
-          }
+          "mappingMode": "autoMapInputData",
+          "value": null
         },
         "options": {}
       },
-      "id": "04810294-8172-491a-b812-701928301933",
-      "name": "04 Execute WF-06 Featured Image Generator",
+      "id": "07810294-8172-491a-b812-701928301936",
+      "name": "07 Execute WF-06 Featured Image Generator",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        672,
-        192
+        1460,
+        -60
       ]
     },
     {
@@ -105,22 +289,41 @@
           "cachedResultName": "Mohamed Arslan — WF-07 Infographic Renderer"
         },
         "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "jobId": "={{ $(\"01 Input Trigger\").item.json.jobId }}",
-            "template": "cost-breakdown",
-            "title": "مقارنة تكاليف زراعة الشعر"
-          }
+          "mappingMode": "autoMapInputData",
+          "value": null
         },
         "options": {}
       },
-      "id": "05810294-8172-491a-b812-701928301934",
-      "name": "05 Execute WF-07 Infographic Renderer",
+      "id": "08810294-8172-491a-b812-701928301937",
+      "name": "08 Execute WF-07 Infographic Renderer",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        896,
-        192
+        1460,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "",
+          "cachedResultName": "Mohamed Arslan — WF-08 Before-After Selector"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "09810294-8172-491a-b812-701928301938",
+      "name": "09 Execute WF-08 Before-After Selector",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1460,
+        180
       ]
     },
     {
@@ -132,21 +335,18 @@
           "cachedResultName": "Mohamed Arslan — WF-09 Optimize Images"
         },
         "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "jobId": "={{ $(\"01 Input Trigger\").item.json.jobId }}",
-            "assetKey": "featured-main"
-          }
+          "mappingMode": "autoMapInputData",
+          "value": null
         },
         "options": {}
       },
-      "id": "06810294-8172-491a-b812-701928301935",
-      "name": "06 Execute WF-09 Optimize Images",
+      "id": "10810294-8172-491a-b812-701928301939",
+      "name": "10 Execute WF-09 Optimize Images",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1120,
-        192
+        1680,
+        64
       ]
     },
     {
@@ -158,36 +358,32 @@
           "cachedResultName": "Mohamed Arslan — WF-10 Upload Media"
         },
         "workflowInputs": {
-          "mappingMode": "defineBelow",
-          "value": {
-            "jobId": "={{ $(\"01 Input Trigger\").item.json.jobId }}",
-            "assetKey": "featured-main",
-            "assetType": "featured_image"
-          }
+          "mappingMode": "autoMapInputData",
+          "value": null
         },
         "options": {}
       },
-      "id": "07810294-8172-491a-b812-701928301936",
-      "name": "07 Execute WF-10 Upload Media",
+      "id": "11810294-8172-491a-b812-701928301940",
+      "name": "11 Execute WF-10 Upload Media",
       "type": "n8n-nodes-base.executeWorkflow",
       "typeVersion": 1.2,
       "position": [
-        1344,
-        192
+        1900,
+        64
       ]
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst feat = $(\"04 Execute WF-06 Featured Image Generator\").first().json;\nconst info = $(\"05 Execute WF-07 Infographic Renderer\").first().json;\nconst opt = $(\"06 Execute WF-09 Optimize Images\").first().json;\nconst up = $(\"07 Execute WF-10 Upload Media\").first().json;\n\nconst errors = [];\nif (!feat || feat.success === false) {\n  errors.push({ code: \"FEATURED_IMAGE_FAILED\", message: (feat && feat.message) || \"WF-06 Featured Image Generator failed.\" });\n}\nif (!info || info.success === false) {\n  errors.push({ code: \"INFOGRAPHIC_FAILED\", message: (info && info.message) || \"WF-07 Infographic Renderer failed.\" });\n}\nif (!opt || opt.success === false) {\n  errors.push({ code: \"IMAGE_OPTIMIZATION_FAILED\", message: (opt && opt.message) || \"WF-09 Optimize Images failed.\" });\n}\nif (!up || up.success === false) {\n  errors.push({ code: \"MEDIA_UPLOAD_FAILED\", message: (up && up.message) || \"WF-10 Upload Media failed.\" });\n}\n\nconst passed = errors.length === 0;\nreturn {\n  jobId: input.jobId,\n  passed,\n  errors,\n  assets: passed ? [feat.data, info.data, opt.data, up.data] : []\n};"
+        "jsCode": "const base = $(\"03B Verify Lock Acquired\").item.json;\nconst uploads = $input.all();\nconst errors = [];\nconst uploadedAssets = [];\n\nfor (const item of uploads) {\n  const j = item.json || {};\n  if (!j || j.success !== true) {\n    errors.push({\n      code: (j.errors && j.errors[0] && j.errors[0].code) || \"ASSET_PIPELINE_FAILED\",\n      message: (j.errors && j.errors[0] && j.errors[0].message) || j.message || \"Asset pipeline step failed for an item.\"\n    });\n  } else {\n    uploadedAssets.push(j.data);\n  }\n}\n\nconst passed = errors.length === 0 && uploads.length > 0;\nreturn {\n  json: {\n    jobId: base.jobId,\n    passed,\n    errors,\n    uploadedAssetsCount: uploadedAssets.length\n  }\n};"
       },
-      "id": "08820194-9128-4019-a829-109284019294",
-      "name": "08 Evaluate Sub-workflow Outputs",
+      "id": "12820194-9128-4019-a829-109284019295",
+      "name": "12 Evaluate All Asset Upload Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1568,
-        192
+        2120,
+        64
       ]
     },
     {
@@ -215,13 +411,13 @@
         },
         "options": {}
       },
-      "id": "09820194-9128-4091-a829-102938102970",
-      "name": "09 All Assets Succeeded Check",
+      "id": "13820194-9128-4091-a829-102938102971",
+      "name": "13 All Uploads Succeeded Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        1792,
-        192
+        2340,
+        64
       ]
     },
     {
@@ -232,13 +428,13 @@
           "queryReplacement": "={{ [$json.jobId] }}"
         }
       },
-      "id": "10820194-9128-4091-a829-102938102971",
-      "name": "10 Update Job Status ASSETS_READY",
+      "id": "14820194-9128-4091-a829-102938102972",
+      "name": "14 Update Job Status ASSETS_READY",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2016,
-        128
+        2560,
+        0
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -253,16 +449,16 @@
         "operation": "executeQuery",
         "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'ASSETS_READY', 'Mohamed Arslan — WF-05 Prepare Assets', $2, $3::jsonb);",
         "options": {
-          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ assetCount: $(\"08 Evaluate Sub-workflow Outputs\").item.json.assets.length })] }}"
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ assetCount: $(\"12 Evaluate All Asset Upload Results\").item.json.uploadedAssetsCount })] }}"
         }
       },
-      "id": "11820194-9128-4091-a829-102938102972",
-      "name": "11 Log Assets Ready Event",
+      "id": "15820194-9128-4091-a829-102938102973",
+      "name": "15 Log Assets Ready Event",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2240,
-        128
+        2780,
+        0
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -275,15 +471,15 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const evalResult = $(\"08 Evaluate Sub-workflow Outputs\").item.json;\nreturn {\n  success: true,\n  jobId: evalResult.jobId,\n  status: \"ASSETS_READY\",\n  message: \"All required media assets generated, rendered, optimized, and uploaded successfully.\",\n  data: {\n    processedAssetsCount: evalResult.assets.length\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"create_preview\", \"cancel\"]\n};"
+        "jsCode": "const evalResult = $(\"12 Evaluate All Asset Upload Results\").item.json;\nreturn {\n  success: true,\n  jobId: evalResult.jobId,\n  status: \"ASSETS_READY\",\n  message: \"All required manifest assets generated, optimized, and uploaded successfully.\",\n  data: {\n    processedAssetsCount: evalResult.uploadedAssetsCount\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"create_preview\", \"cancel\"]\n};"
       },
-      "id": "12829104-9128-4902-8172-910293810305",
-      "name": "12 Return Normalized Response",
+      "id": "16829104-9128-4902-8172-910293810306",
+      "name": "16 Return Normalized Success Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2464,
-        128
+        3000,
+        0
       ]
     },
     {
@@ -294,13 +490,13 @@
           "queryReplacement": "={{ [$json.jobId, JSON.stringify($json.errors)] }}"
         }
       },
-      "id": "13820194-9128-4091-a829-102938102973",
-      "name": "13 Set Status FAILED On Asset Error",
+      "id": "17820194-9128-4091-a829-102938102974",
+      "name": "17 Set Status FAILED On Asset Error",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2016,
-        320
+        2560,
+        240
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -313,15 +509,15 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const evalResult = $(\"08 Evaluate Sub-workflow Outputs\").item.json;\nreturn {\n  success: false,\n  jobId: evalResult.jobId,\n  status: \"FAILED\",\n  message: \"Asset pipeline failed during sub-workflow execution.\",\n  data: null,\n  warnings: [],\n  errors: evalResult.errors,\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+        "jsCode": "const evalResult = $(\"12 Evaluate All Asset Upload Results\").item.json || $(\"02B Check State Eligibility\").item.json || $json || {};\nconst code = (evalResult.errors && evalResult.errors[0] && evalResult.errors[0].code) || evalResult.errorCode || \"ASSET_PIPELINE_FAILED\";\nconst message = (evalResult.errors && evalResult.errors[0] && evalResult.errors[0].message) || evalResult.errorMessage || \"Asset pipeline failed during execution.\";\nconst status = \"FAILED\";\nreturn {\n  success: false,\n  jobId: evalResult.jobId || null,\n  status,\n  message,\n  data: null,\n  warnings: [],\n  errors: evalResult.errors || [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
       },
-      "id": "99820194-8172-4091-b812-701928301933",
+      "id": "99820194-8172-4091-b812-701928301934",
       "name": "99 Build Error Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2240,
-        320
+        2780,
+        240
       ]
     },
     {
@@ -360,7 +556,7 @@
     },
     {
       "parameters": {
-        "content": "WF-05 Prepare Assets\nExecutes WF-06, WF-07, WF-09, WF-10 via Execute Workflow nodes. Sets ASSETS_READY only when all sub-workflows return success.",
+        "content": "WF-05 Prepare Assets\nMulti-asset pipeline parsing manifest from Drive, routing featured images (WF-06), infographics (WF-07), before-after (WF-08) conditionally, optimizing each asset (WF-09), uploading (WF-10), and updating status to ASSETS_READY strictly when success === true.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -392,120 +588,218 @@
       "main": [
         [
           {
-            "node": "03 Set Status ASSETS_PROCESSING",
+            "node": "02B Check State Eligibility",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "03 Set Status ASSETS_PROCESSING": {
+    "02B Check State Eligibility": {
       "main": [
         [
           {
-            "node": "04 Execute WF-06 Featured Image Generator",
+            "node": "03 Acquire Lock and Set Status ASSETS_PROCESSING",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "04 Execute WF-06 Featured Image Generator": {
+    "03 Acquire Lock and Set Status ASSETS_PROCESSING": {
       "main": [
         [
           {
-            "node": "05 Execute WF-07 Infographic Renderer",
+            "node": "03B Verify Lock Acquired",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "05 Execute WF-07 Infographic Renderer": {
+    "03B Verify Lock Acquired": {
       "main": [
         [
           {
-            "node": "06 Execute WF-09 Optimize Images",
+            "node": "03C Lock OK Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "06 Execute WF-09 Optimize Images": {
+    "03C Lock OK Check": {
       "main": [
         [
           {
-            "node": "07 Execute WF-10 Upload Media",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "07 Execute WF-10 Upload Media": {
-      "main": [
-        [
-          {
-            "node": "08 Evaluate Sub-workflow Outputs",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "08 Evaluate Sub-workflow Outputs": {
-      "main": [
-        [
-          {
-            "node": "09 All Assets Succeeded Check",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "09 All Assets Succeeded Check": {
-      "main": [
-        [
-          {
-            "node": "10 Update Job Status ASSETS_READY",
+            "node": "04 Download Manifest From Drive",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "13 Set Status FAILED On Asset Error",
+            "node": "99 Build Error Response",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "10 Update Job Status ASSETS_READY": {
+    "04 Download Manifest From Drive": {
       "main": [
         [
           {
-            "node": "11 Log Assets Ready Event",
+            "node": "05 Parse Manifest And Build Asset Tasks",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "11 Log Assets Ready Event": {
+    "05 Parse Manifest And Build Asset Tasks": {
       "main": [
         [
           {
-            "node": "12 Return Normalized Response",
+            "node": "06 Route By Asset Type",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "13 Set Status FAILED On Asset Error": {
+    "06 Route By Asset Type": {
+      "main": [
+        [
+          {
+            "node": "07 Execute WF-06 Featured Image Generator",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "08 Execute WF-07 Infographic Renderer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "09 Execute WF-08 Before-After Selector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Execute WF-06 Featured Image Generator": {
+      "main": [
+        [
+          {
+            "node": "10 Execute WF-09 Optimize Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Execute WF-07 Infographic Renderer": {
+      "main": [
+        [
+          {
+            "node": "10 Execute WF-09 Optimize Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Execute WF-08 Before-After Selector": {
+      "main": [
+        [
+          {
+            "node": "10 Execute WF-09 Optimize Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Execute WF-09 Optimize Images": {
+      "main": [
+        [
+          {
+            "node": "11 Execute WF-10 Upload Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 Execute WF-10 Upload Media": {
+      "main": [
+        [
+          {
+            "node": "12 Evaluate All Asset Upload Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12 Evaluate All Asset Upload Results": {
+      "main": [
+        [
+          {
+            "node": "13 All Uploads Succeeded Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "13 All Uploads Succeeded Check": {
+      "main": [
+        [
+          {
+            "node": "14 Update Job Status ASSETS_READY",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "17 Set Status FAILED On Asset Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "14 Update Job Status ASSETS_READY": {
+      "main": [
+        [
+          {
+            "node": "15 Log Assets Ready Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "15 Log Assets Ready Event": {
+      "main": [
+        [
+          {
+            "node": "16 Return Normalized Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "17 Set Status FAILED On Asset Error": {
       "main": [
         [
           {

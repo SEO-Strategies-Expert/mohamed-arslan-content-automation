@@ -26,10 +26,10 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const item = $input.item;\nconst j = item.json || {};\nconst jobId = j.jobId || null;\nconst assetKey = j.assetKey || \"featured-main\";\nconst binaryObj = item.binary && item.binary.data ? item.binary.data : null;\n\nif (!binaryObj || !binaryObj.data) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      errorCode: \"MISSING_BINARY_IMAGE\",\n      errorMessage: \"No binary image data supplied for image optimization.\"\n    }\n  };\n}\n\nlet sharp = null;\ntry {\n  sharp = require(\"sharp\");\n} catch (e) {\n  sharp = null;\n}\n\nif (!sharp) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      errorCode: \"IMAGE_CONVERTER_NOT_CONFIGURED\",\n      errorMessage: \"Image converter (Sharp module) is not configured in this n8n instance. Cannot perform WebP conversion.\"\n    }\n  };\n}\n\nconst crypto = require(\"crypto\");\nconst inputBuffer = Buffer.from(binaryObj.data, \"base64\");\n\nreturn sharp(inputBuffer)\n  .webp({ quality: 82 })\n  .toBuffer()\n  .then(webpBuffer => {\n    const fileSizeBytes = webpBuffer.length;\n    const checksum = crypto.createHash(\"sha256\").update(webpBuffer).digest(\"hex\");\n    const base64WebP = webpBuffer.toString(\"base64\");\n    return {\n      json: {\n        ok: true,\n        jobId,\n        assetKey,\n        fileSizeBytes,\n        checksum,\n        mimeType: \"image/webp\"\n      },\n      binary: {\n        data: {\n          data: base64WebP,\n          mimeType: \"image/webp\",\n          fileName: `${assetKey}.webp`,\n          fileExtension: \"webp\",\n          fileSize: `${fileSizeBytes} B`\n        }\n      }\n    };\n  })\n  .catch(err => {\n    return {\n      json: {\n        ok: false,\n        jobId,\n        errorCode: \"WEBP_CONVERSION_FAILED\",\n        errorMessage: \"Sharp WebP conversion failed: \" + err.message\n      }\n    };\n  });"
+        "jsCode": "const item = $input.item;\nconst j = item.json || {};\nconst jobId = j.jobId || null;\nconst assetKey = j.assetKey || \"featured-main\";\nconst binaryObj = item.binary && item.binary.data ? item.binary.data : null;\n\nif (!binaryObj || !binaryObj.data) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      errorCode: \"MISSING_BINARY_IMAGE\",\n      errorMessage: \"No binary image data supplied for image optimization.\"\n    }\n  };\n}\n\nlet sharp = null;\ntry {\n  sharp = require(\"sharp\");\n} catch (e) {\n  sharp = null;\n}\n\nif (!sharp) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      errorCode: \"IMAGE_CONVERTER_NOT_CONFIGURED\",\n      errorMessage: \"Image converter (Sharp module) is not configured in this n8n instance. Requires environment variable NODE_FUNCTION_ALLOW_EXTERNAL=sharp and npm install sharp.\"\n    }\n  };\n}\n\nconst crypto = require(\"crypto\");\nconst inputBuffer = Buffer.from(binaryObj.data, \"base64\");\nconst sharpInstance = sharp(inputBuffer);\n\nreturn sharpInstance\n  .metadata()\n  .then(meta => {\n    return sharpInstance\n      .webp({ quality: 82 })\n      .toBuffer()\n      .then(webpBuffer => {\n        const fileSizeBytes = webpBuffer.length;\n        const checksum = crypto.createHash(\"sha256\").update(webpBuffer).digest(\"hex\");\n        const base64WebP = webpBuffer.toString(\"base64\");\n        const width = meta.width || 1200;\n        const height = meta.height || 630;\n        return {\n          json: {\n            ok: true,\n            jobId,\n            assetKey,\n            width,\n            height,\n            fileSizeBytes,\n            checksum,\n            mimeType: \"image/webp\"\n          },\n          binary: {\n            data: {\n              data: base64WebP,\n              mimeType: \"image/webp\",\n              fileName: `${assetKey}.webp`,\n              fileExtension: \"webp\",\n              fileSize: `${fileSizeBytes} B`\n            }\n          }\n        };\n      });\n  })\n  .catch(err => {\n    return {\n      json: {\n        ok: false,\n        jobId,\n        errorCode: \"WEBP_CONVERSION_FAILED\",\n        errorMessage: \"Sharp WebP conversion failed: \" + err.message\n      }\n    };\n  });"
       },
       "id": "02810294-8172-491a-b812-701928301929",
-      "name": "02 Perform WebP Conversion",
+      "name": "02 Perform WebP Conversion and Metadata Extraction",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -74,7 +74,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const item = $input.item;\nconst opt = item.json || {};\nconst norm = {\n  success: true,\n  jobId: opt.jobId,\n  status: \"ASSET_OPTIMIZED\",\n  message: \"Image converted to WebP and optimized successfully.\",\n  data: {\n    assetKey: opt.assetKey,\n    fileSizeBytes: opt.fileSizeBytes,\n    checksum: opt.checksum,\n    mimeType: opt.mimeType\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"upload_media\"]\n};\nreturn {\n  json: norm,\n  binary: item.binary\n};"
+        "jsCode": "const item = $input.item;\nconst opt = item.json || {};\nconst norm = {\n  success: true,\n  jobId: opt.jobId,\n  status: \"ASSET_OPTIMIZED\",\n  message: \"Image converted to WebP and optimized successfully.\",\n  data: {\n    assetKey: opt.assetKey,\n    width: opt.width,\n    height: opt.height,\n    fileSizeBytes: opt.fileSizeBytes,\n    checksum: opt.checksum,\n    mimeType: opt.mimeType\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"upload_media\"]\n};\nreturn {\n  json: norm,\n  binary: item.binary\n};"
       },
       "id": "04829104-9128-4902-8172-910293810314",
       "name": "04 Return Normalized Response",
@@ -141,7 +141,7 @@
     },
     {
       "parameters": {
-        "content": "WF-09 Optimize Images\nRequires binary image input. Performs WebP conversion via Sharp module or returns NOT_CONFIGURED status when renderer is not installed. Preserves binary output.",
+        "content": "WF-09 Optimize Images\nRequires binary image input. Performs WebP conversion & metadata extraction via Sharp module (requires NODE_FUNCTION_ALLOW_EXTERNAL=sharp). Preserves binary output.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -162,14 +162,14 @@
       "main": [
         [
           {
-            "node": "02 Perform WebP Conversion",
+            "node": "02 Perform WebP Conversion and Metadata Extraction",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "02 Perform WebP Conversion": {
+    "02 Perform WebP Conversion and Metadata Extraction": {
       "main": [
         [
           {
@@ -213,7 +213,7 @@
       "main": [
         [
           {
-            "node": "02 Perform WebP Conversion",
+            "node": "02 Perform WebP Conversion and Metadata Extraction",
             "type": "main",
             "index": 0
           }

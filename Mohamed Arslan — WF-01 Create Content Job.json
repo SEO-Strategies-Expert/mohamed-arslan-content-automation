@@ -1,0 +1,985 @@
+{
+  "name": "Mohamed Arslan — WF-01 Create Content Job",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "siteKey"
+            },
+            {
+              "name": "environment"
+            },
+            {
+              "name": "driveFolderId"
+            }
+          ]
+        }
+      },
+      "id": "aa9ce13e-c3be-4f1c-87ef-e5d0b7b04bc7",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst jobId = (j.jobId || \"\").trim();\nconst siteKey = (j.siteKey || \"\").trim();\nconst environment = (j.environment || \"\").trim();\nconst driveFolderId = (j.driveFolderId || \"\").trim();\nconst validEnvs = [\"development\", \"staging\", \"production\"];\nlet errorCode = null;\nlet errorMessage = null;\nif (!jobId || !siteKey || !environment || !driveFolderId) {\n  errorCode = \"INVALID_INPUT\";\n  errorMessage = \"Missing required input: jobId, siteKey, environment and driveFolderId are all required.\";\n} else if (!validEnvs.includes(environment)) {\n  errorCode = \"INVALID_INPUT\";\n  errorMessage = \"environment must be one of development, staging or production.\";\n}\nreturn { jobId, siteKey, environment, driveFolderId, ok: errorCode === null, errorCode, errorMessage };"
+      },
+      "id": "0f5e2851-417c-4b53-9963-a1969dd92500",
+      "name": "02 Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ca0ac30a-76f6-47c3-b727-699accb67f25",
+      "name": "03 Input Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const c = $json || {};\nconst jobId = c.jobId || \"\";\n// jobId format: MOHAMED-ARSLAN-<SITE>-<TYPE>-<YYYYMMDD>-<NNNN>\nconst jobIdPattern = /^MOHAMED-ARSLAN-[A-Z0-9]+-[A-Z0-9]+-[0-9]{8}-[0-9]{4}$/;\nlet errorCode = null;\nlet errorMessage = null;\nif (!jobIdPattern.test(jobId)) {\n  errorCode = \"INVALID_JOB_ID\";\n  errorMessage = \"jobId does not match required format MOHAMED-ARSLAN-<SITE>-<TYPE>-<YYYYMMDD>-<NNNN>.\";\n}\nreturn {\n  jobId: c.jobId,\n  siteKey: c.siteKey,\n  environment: c.environment,\n  driveFolderId: c.driveFolderId,\n  ok: errorCode === null,\n  errorCode,\n  errorMessage,\n};"
+      },
+      "id": "34e40a67-377d-4970-9615-1812af06478e",
+      "name": "04 Validate Job ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "4bfa0c3d-38ec-49fc-a541-d931a378ab0a",
+      "name": "05 Job ID Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        496
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT site_key, environment, base_url, api_base_url, default_language, supported_languages, active FROM site_configs WHERE site_key = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.siteKey }}"
+        }
+      },
+      "id": "51bd002e-e68c-4ffd-bf88-e7e9e07507a2",
+      "name": "06 Load Site Config",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        416
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "bIDzlp9iWQc169BP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"04 Validate Job ID\").item.json;\nconst row = $json && $json.site_key ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"SITE_NOT_FOUND\";\n  errorMessage = \"No site_configs row found for site_key \" + input.siteKey + \".\";\n} else if (row.active !== true) {\n  errorCode = \"SITE_INACTIVE\";\n  errorMessage = \"Site \" + input.siteKey + \" is not active.\";\n} else if (String(row.environment) !== String(input.environment)) {\n  errorCode = \"ENVIRONMENT_MISMATCH\";\n  errorMessage = \"Requested environment \" + input.environment + \" does not match site environment \" + row.environment + \".\";\n}\nreturn {\n  jobId: input.jobId,\n  siteKey: input.siteKey,\n  environment: input.environment,\n  driveFolderId: input.driveFolderId,\n  siteConfig: row,\n  ok: errorCode === null,\n  errorCode,\n  errorMessage,\n};"
+      },
+      "id": "34858a5b-15b6-4fb2-85e0-eda3a1bd8d5c",
+      "name": "07 Check Site Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "aff5b205-9317-41ce-809b-44066fc859fa",
+      "name": "08 Site OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "queryString": "manifest.json",
+        "limit": 5,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "={{ $json.driveFolderId }}"
+          },
+          "whatToSearch": "files"
+        },
+        "options": {}
+      },
+      "id": "305f071c-2ce2-4c13-a97e-12697d1b73f8",
+      "name": "09 Find Manifest In Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1792,
+        352
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"07 Check Site Config\").item.json;\nconst fileId = $json && $json.id ? $json.id : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!fileId) {\n  errorCode = \"MANIFEST_MISSING\";\n  errorMessage = \"manifest.json was not found in the job folder.\";\n}\nreturn {\n  jobId: input.jobId,\n  siteKey: input.siteKey,\n  environment: input.environment,\n  driveFolderId: input.driveFolderId,\n  siteConfig: input.siteConfig,\n  manifestFileId: fileId,\n  ok: errorCode === null,\n  errorCode,\n  errorMessage,\n};"
+      },
+      "id": "665972e5-bb1b-4ed2-a2e1-2489e75d280b",
+      "name": "10 Check Manifest Exists",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1f3b393c-e695-44d2-b1a9-ffa291b31138",
+      "name": "11 Manifest Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2240,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.manifestFileId }}"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "773a74fc-769c-426b-8d62-2bd67681c722",
+      "name": "12 Download Manifest",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2464,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\nlet manifest = null;\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    const raw = Buffer.from(item.binary.data.data, \"base64\").toString(\"utf-8\");\n    manifest = JSON.parse(raw);\n  } else if ($json && $json.manifest) {\n    manifest = $json.manifest;\n  }\n} catch (e) {\n  manifest = null;\n}\nreturn { manifest };"
+      },
+      "id": "00ac47c0-b5de-44e3-b3ff-ed84b871d0ef",
+      "name": "13 Extract Manifest JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const ctx = $(\"10 Check Manifest Exists\").item.json;\nconst m = ($json && $json.manifest) ? $json.manifest : null;\nlet errorCode = null;\nlet errorMessage = null;\nconst missing = [];\nif (!m || typeof m !== \"object\") {\n  errorCode = \"MANIFEST_INVALID\";\n  errorMessage = \"manifest.json could not be parsed as an object.\";\n} else {\n  const required = [\"schemaVersion\", \"jobId\", \"siteKey\", \"operation\", \"targetLanguages\", \"driveFolderId\", \"content\"];\n  for (const key of required) {\n    if (m[key] === undefined || m[key] === null || m[key] === \"\") missing.push(key);\n  }\n  if (!Array.isArray(m.targetLanguages) || m.targetLanguages.length === 0) {\n    if (!missing.includes(\"targetLanguages\")) missing.push(\"targetLanguages\");\n  }\n  if (missing.length > 0) {\n    errorCode = \"MANIFEST_INVALID\";\n    errorMessage = \"manifest.json is missing required fields: \" + missing.join(\", \") + \".\";\n  } else if (String(m.jobId) !== String(ctx.jobId)) {\n    errorCode = \"MANIFEST_INVALID\";\n    errorMessage = \"manifest jobId (\" + m.jobId + \") does not match requested jobId (\" + ctx.jobId + \").\";\n  }\n}\nreturn {\n  jobId: ctx.jobId,\n  siteKey: ctx.siteKey,\n  environment: ctx.environment,\n  driveFolderId: ctx.driveFolderId,\n  manifestFileId: ctx.manifestFileId,\n  manifest: m,\n  ok: errorCode === null,\n  errorCode,\n  errorMessage,\n};"
+      },
+      "id": "ef48c635-b620-4695-bc69-068fd1e99821",
+      "name": "14 Validate Manifest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f56c9b95-61cd-4e62-87c9-fee8de501803",
+      "name": "15 Manifest Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3136,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const c = $json;\nconst m = c.manifest || {};\nconst operation = m.operation || \"create_article\";\nconst idempotencyKey = c.jobId + \":\" + operation + \":create\";\nconst approvalRequired = (m.publication && typeof m.publication.approvalRequired === \"boolean\") ? m.publication.approvalRequired : true;\nreturn {\n  jobId: c.jobId,\n  siteKey: c.siteKey,\n  environment: c.environment,\n  driveFolderId: c.driveFolderId,\n  manifestFileId: c.manifestFileId,\n  operation,\n  status: \"CREATED\",\n  sourceLanguage: m.sourceLanguage || null,\n  targetLanguages: Array.isArray(m.targetLanguages) ? m.targetLanguages : [],\n  requestedBy: m.requestedBy || null,\n  approvalRequired,\n  idempotencyKey,\n};"
+      },
+      "id": "c4927401-bcf1-4322-9db9-1d565e072e77",
+      "name": "16 Build Job Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, status FROM content_jobs WHERE job_id = $1 OR idempotency_key = $2 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }},{{ $json.idempotencyKey }}"
+        }
+      },
+      "id": "dde5adfa-e6cf-4ccb-9cde-c726b6310089",
+      "name": "17 Check Duplicate",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3584,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "bIDzlp9iWQc169BP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const rec = $(\"16 Build Job Record\").item.json;\nconst existing = ($json && $json.job_id) ? $json.job_id : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (existing) {\n  errorCode = \"DUPLICATE_JOB\";\n  errorMessage = \"A job with the same jobId or idempotencyKey already exists: \" + existing + \".\";\n}\nreturn Object.assign({}, rec, { ok: errorCode === null, errorCode, errorMessage });"
+      },
+      "id": "06f4e54f-0f28-4598-b219-71ca380eb9f4",
+      "name": "18 Evaluate Duplicate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3808,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "77407023-a5fa-446d-8af7-695064426376",
+      "name": "19 Not Duplicate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4032,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_jobs\n  (job_id, site_key, operation, status, source_language, target_languages, drive_folder_id, manifest_file_id, requested_by, approval_required, idempotency_key)\nVALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::boolean, $11)\nRETURNING job_id, status, created_at;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.siteKey, $json.operation, $json.status, $json.sourceLanguage, JSON.stringify($json.targetLanguages), $json.driveFolderId, $json.manifestFileId, $json.requestedBy, $json.approvalRequired, $json.idempotencyKey] }}"
+        }
+      },
+      "id": "32aa8f20-3c54-43fd-9180-4f81a5c5c71d",
+      "name": "20 Insert Content Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4256,
+        64
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "bIDzlp9iWQc169BP",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, $2, $3, $4, $5::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$(\"20 Insert Content Job\").item.json.job_id, \"CREATED\", \"Mohamed Arslan — WF-01 Create Content Job\", $execution.id, JSON.stringify({ siteKey: $(\"18 Evaluate Duplicate\").item.json.siteKey, operation: $(\"18 Evaluate Duplicate\").item.json.operation }) ] }}"
+        }
+      },
+      "id": "7b44a1cc-b24c-445c-b6d0-a9cd0955a970",
+      "name": "21 Insert Created Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4480,
+        -16
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "bIDzlp9iWQc169BP",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const rec = $(\"18 Evaluate Duplicate\").item.json;\nreturn {\n  success: true,\n  jobId: rec.jobId,\n  status: \"CREATED\",\n  message: \"Content job created successfully.\",\n  data: {\n    siteKey: rec.siteKey,\n    environment: rec.environment,\n    operation: rec.operation,\n    targetLanguages: rec.targetLanguages,\n    idempotencyKey: rec.idempotencyKey,\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"validate\", \"cancel\"],\n};"
+      },
+      "id": "2a9f0126-7f5a-4d01-8ff0-867c6fcaf1e8",
+      "name": "22 Build Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4704,
+        -64
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const rec = $(\"18 Evaluate Duplicate\").item.json || {};\nconst err = ($json && $json.error) ? $json.error : ($json && $json.message ? $json.message : \"Database operation failed\");\nreturn {\n  jobId: rec.jobId || null,\n  errorCode: \"DATABASE_ERROR\",\n  errorMessage: typeof err === \"string\" ? err : JSON.stringify(err),\n};"
+      },
+      "id": "40770e55-e368-430a-a308-374cf1b0dba6",
+      "name": "90 Database Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4256,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An unknown error occurred while creating the content job.\";\nlet jobId = j.jobId || null;\nif (!jobId) { try { jobId = $(\"01 Input Trigger\").item.json.jobId || null; } catch (e) { jobId = null; } }\n// Retry is allowed only for transient / correctable cases\nconst retryable = [\"DRIVE_FOLDER_NOT_FOUND\", \"MANIFEST_MISSING\", \"MANIFEST_INVALID\", \"DATABASE_ERROR\"];\nconst nextAllowedActions = retryable.includes(code) ? [\"retry\", \"cancel\"] : [\"cancel\"];\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, message }],\n  nextAllowedActions,\n};"
+      },
+      "id": "f959f1ec-584c-468f-ad2f-5a8dd0f9f811",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4480,
+        624
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"07 Check Site Config\").item.json;\nreturn {\n  jobId: input.jobId,\n  siteKey: input.siteKey,\n  errorCode: \"DRIVE_FOLDER_NOT_FOUND\",\n  errorMessage: \"Google Drive folder could not be accessed or does not exist: \" + (input.driveFolderId || \"\"),\n};"
+      },
+      "id": "1f2670cd-1d73-451e-b4fa-0a08bb91f654",
+      "name": "09E Drive Folder Not Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4704,
+        704
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a27d76f6-776d-44ad-8c68-d0c6f9d3dc28",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        464
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "siteKey",
+              "type": "string",
+              "value": "mohamed-arslan-test-site"
+            },
+            {
+              "id": "a3",
+              "name": "environment",
+              "type": "string",
+              "value": "development"
+            },
+            {
+              "id": "a4",
+              "name": "driveFolderId",
+              "type": "string",
+              "value": "GOOGLE_DRIVE_TEST_FOLDER_ID"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e7a27f88-48ca-41ad-b6e7-c82bf24b0e76",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-01 Create Content Job\nSub-workflow (Execute Sub-workflow) with an optional Manual Test Trigger. Validates input, then jobId format, loads site_configs, reads manifest.json from Drive, checks duplicates, inserts a CREATED job + job_events row. Returns the normalized response contract.",
+        "height": 340,
+        "width": 400,
+        "color": 4
+      },
+      "id": "e7855cc9-c03a-4528-94ef-04a39e4e950c",
+      "name": "Sticky Note e7855cc9",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        -112
+      ]
+    },
+    {
+      "parameters": {
+        "content": "Error paths (all → 99 Build Error Response):\nINVALID_INPUT, INVALID_JOB_ID, SITE_NOT_FOUND, SITE_INACTIVE, ENVIRONMENT_MISMATCH, DRIVE_FOLDER_NOT_FOUND, MANIFEST_MISSING, MANIFEST_INVALID, DUPLICATE_JOB, DATABASE_ERROR.",
+        "height": 320,
+        "width": 400,
+        "color": 3
+      },
+      "id": "d03985cf-17bb-4c22-8c1a-cba0fc6758b7",
+      "name": "Sticky Note d03985cf",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -272,
+        -112
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Validate Input": {
+      "main": [
+        [
+          {
+            "node": "03 Input Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Input Valid?": {
+      "main": [
+        [
+          {
+            "node": "04 Validate Job ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Validate Job ID": {
+      "main": [
+        [
+          {
+            "node": "05 Job ID Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Job ID Valid?": {
+      "main": [
+        [
+          {
+            "node": "06 Load Site Config",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Load Site Config": {
+      "main": [
+        [
+          {
+            "node": "07 Check Site Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Check Site Config": {
+      "main": [
+        [
+          {
+            "node": "08 Site OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Site OK?": {
+      "main": [
+        [
+          {
+            "node": "09 Find Manifest In Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Find Manifest In Drive": {
+      "main": [
+        [
+          {
+            "node": "10 Check Manifest Exists",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "09E Drive Folder Not Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Check Manifest Exists": {
+      "main": [
+        [
+          {
+            "node": "11 Manifest Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 Manifest Found?": {
+      "main": [
+        [
+          {
+            "node": "12 Download Manifest",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12 Download Manifest": {
+      "main": [
+        [
+          {
+            "node": "13 Extract Manifest JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "13 Extract Manifest JSON": {
+      "main": [
+        [
+          {
+            "node": "14 Validate Manifest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "14 Validate Manifest": {
+      "main": [
+        [
+          {
+            "node": "15 Manifest Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "15 Manifest Valid?": {
+      "main": [
+        [
+          {
+            "node": "16 Build Job Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "16 Build Job Record": {
+      "main": [
+        [
+          {
+            "node": "17 Check Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "17 Check Duplicate": {
+      "main": [
+        [
+          {
+            "node": "18 Evaluate Duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "18 Evaluate Duplicate": {
+      "main": [
+        [
+          {
+            "node": "19 Not Duplicate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "19 Not Duplicate?": {
+      "main": [
+        [
+          {
+            "node": "20 Insert Content Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "20 Insert Content Job": {
+      "main": [
+        [
+          {
+            "node": "21 Insert Created Event",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "90 Database Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "21 Insert Created Event": {
+      "main": [
+        [
+          {
+            "node": "22 Build Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "90 Database Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "90 Database Error": {
+      "main": [
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09E Drive Folder Not Found": {
+      "main": [
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ac9b730f-8e8a-42a7-af56-b5cf42d56e60",
+  "meta": {
+    "instanceId": "44e48816eb6a635d1d61fd0c5cd53adbe6d17056652229d74479b229836e62fa"
+  },
+  "nodeGroups": [],
+  "id": "kZdNUH8bHiMUTTUC",
+  "tags": []
+}

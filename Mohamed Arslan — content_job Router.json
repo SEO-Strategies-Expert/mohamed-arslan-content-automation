@@ -1,0 +1,476 @@
+{
+  "name": "Mohamed Arslan — content_job Router",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "action"
+            },
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "siteKey"
+            },
+            {
+              "name": "environment"
+            },
+            {
+              "name": "driveFolderId"
+            },
+            {
+              "name": "publishAt"
+            },
+            {
+              "name": "reason"
+            }
+          ]
+        }
+      },
+      "id": "a76f3e60-eeab-44da-97c2-971061e400d2",
+      "name": "01 Router Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst action = (j.action || \"\").trim();\nconst jobId = (j.jobId || \"\").trim();\nconst allowed = [\"create\", \"validate\", \"status\", \"cancel\", \"retry\"];\nlet errorCode = null;\nlet errorMessage = null;\nif (!action || !allowed.includes(action)) {\n  errorCode = \"INVALID_ACTION\";\n  errorMessage = \"action must be one of: \" + allowed.join(\", \") + \".\";\n} else if (!jobId) {\n  errorCode = \"INVALID_INPUT\";\n  errorMessage = \"jobId is required for every content_job action.\";\n}\nreturn {\n  action,\n  jobId,\n  siteKey: j.siteKey || null,\n  environment: j.environment || null,\n  driveFolderId: j.driveFolderId || null,\n  publishAt: j.publishAt || null,\n  reason: j.reason || null,\n  ok: errorCode === null,\n  errorCode,\n  errorMessage,\n};"
+      },
+      "id": "7ffe4dfa-1410-48e3-8c35-7d9fb10bbd73",
+      "name": "02 Validate Tool Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ok && $json.action === \"create\" }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "create"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ok && $json.action === \"validate\" }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "validate"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ok && $json.action === \"status\" }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "status"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ok && $json.action === \"cancel\" }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cancel"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.ok && $json.action === \"retry\" }}",
+                    "rightValue": true,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retry"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "invalid"
+        }
+      },
+      "id": "f640b4a6-c42a-4fac-9dc6-5549e5f42a96",
+      "name": "03 Route By Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "kZdNUH8bHiMUTTUC",
+          "cachedResultName": "Mohamed Arslan — WF-01 Create Content Job"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "72901a9d-ab5e-4582-a508-81f325145308",
+      "name": "10 Execute WF-01 Create",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "f0cwJoSmLG0DRUKU",
+          "cachedResultName": "Mohamed Arslan — WF-02 Validate Content Package"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "827bcfc9-0a0b-47eb-bb69-95f3a973bbfb",
+      "name": "20 Execute WF-02 Validate",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, site_key, operation, status, target_languages, preview_urls, published_urls, scheduled_at, updated_at FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "5954e27f-62ce-4f7d-9a42-dbe6821334b7",
+      "name": "30 Query Job Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        384
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "bIDzlp9iWQc169BP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobId = $(\"02 Validate Tool Input\").item.json.jobId;\nconst row = ($json && $json.job_id) ? $json : null;\nif (!row) {\n  return {\n    success: false,\n    jobId,\n    status: \"FAILED\",\n    message: \"No job found for jobId \" + jobId + \".\",\n    data: null,\n    warnings: [],\n    errors: [{ code: \"JOB_NOT_FOUND\", message: \"No content_jobs row found.\" }],\n    nextAllowedActions: [],\n  };\n}\nconst nextByStatus = {\n  CREATED: [\"validate\", \"cancel\"],\n  VALIDATION_FAILED: [\"retry\", \"cancel\"],\n  CONTENT_READY: [\"prepare_assets\", \"cancel\"],\n};\nreturn {\n  success: true,\n  jobId: row.job_id,\n  status: row.status,\n  message: \"Current job status retrieved.\",\n  data: {\n    siteKey: row.site_key,\n    operation: row.operation,\n    targetLanguages: row.target_languages,\n    previewUrls: row.preview_urls,\n    publishedUrls: row.published_urls,\n    scheduledAt: row.scheduled_at,\n    updatedAt: row.updated_at,\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: nextByStatus[row.status] || [\"cancel\"],\n};"
+      },
+      "id": "1490f602-ae38-4e2d-b40d-be9e118ec895",
+      "name": "31 Normalize Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs\nSET status = 'CANCELLED', last_error = $2, updated_at = NOW()\nWHERE job_id = $1 AND status NOT IN ('PUBLISHED','COMPLETED')\nRETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, ($json.reason || \"Cancelled via content_job tool\")] }}"
+        }
+      },
+      "id": "410fc6f3-0a43-4cd6-9a23-ef43275b71c8",
+      "name": "40 Cancel Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        576
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "bIDzlp9iWQc169BP",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobId = $(\"02 Validate Tool Input\").item.json.jobId;\nconst row = ($json && $json.job_id) ? $json : null;\nif (!row) {\n  return {\n    success: false,\n    jobId,\n    status: \"FAILED\",\n    message: \"Job could not be cancelled — it may not exist or is already PUBLISHED/COMPLETED.\",\n    data: null,\n    warnings: [],\n    errors: [{ code: \"CANCEL_NOT_ALLOWED\", message: \"Job not found or in a non-cancellable state.\" }],\n    nextAllowedActions: [\"status\"],\n  };\n}\nreturn {\n  success: true,\n  jobId: row.job_id,\n  status: \"CANCELLED\",\n  message: \"Job cancelled.\",\n  data: {},\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [],\n};"
+      },
+      "id": "988864e0-6a02-44b7-9ac6-509062644875",
+      "name": "41 Normalize Cancel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        576
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "f0cwJoSmLG0DRUKU",
+          "cachedResultName": "Mohamed Arslan — WF-02 Validate Content Package"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "45b59eb7-844f-44d1-8cd9-b5a69be65496",
+      "name": "50 Execute WF-02 (Retry Validate)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message: j.errorMessage || \"Invalid content_job tool call.\",\n  data: null,\n  warnings: [],\n  errors: [{ code: j.errorCode || \"INVALID_INPUT\", message: j.errorMessage || \"Invalid content_job tool call.\" }],\n  nextAllowedActions: [],\n};"
+      },
+      "id": "f0ca8a04-79df-4eb1-ad5b-314ee78dd020",
+      "name": "99 Invalid Input Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "content": "content_job Router (backs the WF-00 MCP tool)\nValidates tool input → routes action to the right sub-workflow / query → returns the normalized contract. No create/validate business logic lives here.\ncreate → WF-01 · validate & retry → WF-02 · status → SELECT · cancel → UPDATE CANCELLED · invalid → normalized error.",
+        "height": 340,
+        "width": 440,
+        "color": 4
+      },
+      "id": "e798b1b2-0fe3-4c30-b171-9f2de6971290",
+      "name": "Sticky Note e798b1b2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Router Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Tool Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Validate Tool Input": {
+      "main": [
+        [
+          {
+            "node": "03 Route By Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Route By Action": {
+      "main": [
+        [
+          {
+            "node": "10 Execute WF-01 Create",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "20 Execute WF-02 Validate",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "30 Query Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "40 Cancel Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "50 Execute WF-02 (Retry Validate)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Invalid Input Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "30 Query Job Status": {
+      "main": [
+        [
+          {
+            "node": "31 Normalize Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "40 Cancel Job": {
+      "main": [
+        [
+          {
+            "node": "41 Normalize Cancel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d6ba927e-accd-4759-bdd4-57a2eff62715",
+  "meta": {
+    "instanceId": "44e48816eb6a635d1d61fd0c5cd53adbe6d17056652229d74479b229836e62fa"
+  },
+  "nodeGroups": [],
+  "id": "6ggApWQ3NBdptZsf",
+  "tags": []
+}

@@ -22,7 +22,7 @@ if (files.length === 0) {
 let hasError = false;
 let totalChecked = 0;
 
-console.log(`Starting strict production validation of ${files.length} workflow files in workflows/...`);
+console.log(`Starting strict functional blocker validation of ${files.length} workflow files in workflows/...`);
 
 const EXPECTED_PREFIX = 'Mohamed Arslan';
 const FORBIDDEN_WORDS = ['wisal', 'Wisal', 'WISAL'];
@@ -55,7 +55,6 @@ const REQUIRED_RESPONSE_KEYS = [
   'nextAllowedActions'
 ];
 
-// Anti-pattern regexes for fake fallback data after HTTP calls
 const FALLBACK_SUCCESS_PATTERNS = [
   /resp\.previewUrls\s*\|\|/,
   /resp\.publishedUrls\s*\|\|/,
@@ -63,6 +62,16 @@ const FALLBACK_SUCCESS_PATTERNS = [
   /resp\.finalUrl\s*\|\|/,
   /http200:\s*apiResp\.httpStatus\s*===\s*200\s*\|\|\s*true/,
   /sitemapUpdated:\s*apiResp\.sitemapUpdated\s*!==\s*undefined\s*\?\s*apiResp\.sitemapUpdated\s*:\s*true/
+];
+
+// Anti-patterns for Publish contentId fallbacks
+const PUBLISH_FALLBACK_PATTERNS = [
+  /content_id\s*\|\|\s*.*job_id/i,
+  /contentId\s*\|\|\s*.*jobId/i,
+  /\/content\/\$\{[^}]*job_id\}/i,
+  /\/content\/\$\{[^}]*jobId\}/i,
+  /\/content\/\{\{[^}]*job_id\}\}\/publish/i,
+  /\/content\/\{\{[^}]*jobId\}\}\/publish/i
 ];
 
 for (const file of files) {
@@ -115,7 +124,26 @@ for (const file of files) {
     }
   }
 
-  // 6. JSON Parse Check
+  // 6. Check for contentId fallback to jobId in WF-14 or publish endpoints
+  if (file === 'wf-14-publish-content.json') {
+    for (const pattern of PUBLISH_FALLBACK_PATTERNS) {
+      if (pattern.test(content)) {
+        fileErrors.push(`WF-14 contains invalid contentId fallback pattern matching ${pattern}`);
+      }
+    }
+  }
+
+  // 7. Check WF-05 for hardcoded READY asset arrays or missing execute workflow nodes
+  if (file === 'wf-05-prepare-assets.json') {
+    if (content.includes('processedAssets = [') || content.includes('processedAssets: [')) {
+      fileErrors.push('WF-05 contains hardcoded processedAssets array!');
+    }
+    if (!content.includes('n8n-nodes-base.executeWorkflow')) {
+      fileErrors.push('WF-05 is missing executeWorkflow nodes for child workflows!');
+    }
+  }
+
+  // 8. JSON Parse Check
   let workflow = null;
   try {
     workflow = JSON.parse(content);
@@ -124,17 +152,17 @@ for (const file of files) {
   }
 
   if (workflow) {
-    // 7. Workflow Name check
+    // 9. Workflow Name check
     if (!workflow.name || !workflow.name.startsWith(EXPECTED_PREFIX)) {
       fileErrors.push(`Workflow name '${workflow.name}' does not start with '${EXPECTED_PREFIX}'`);
     }
 
-    // 8. Active state check
+    // 10. Active state check
     if (workflow.active !== false) {
       fileErrors.push(`Workflow active state is ${workflow.active}, expected false`);
     }
 
-    // 9. Node validation
+    // 11. Node validation
     if (!Array.isArray(workflow.nodes)) {
       fileErrors.push('Workflow missing nodes array');
     } else {
@@ -151,10 +179,19 @@ for (const file of files) {
         }
         nodeNames.add(node.name);
 
+        // Binary preservation check on asset response nodes
+        if (['wf-06-featured-image-generator.json', 'wf-07-infographic-renderer', 'wf-09-optimize-images.json'].includes(file)) {
+          if (node.name.includes('Return') || node.name.includes('Response')) {
+            const jsCode = (node.parameters && node.parameters.jsCode) ? node.parameters.jsCode : '';
+            if (jsCode.includes('return {') && !jsCode.includes('binary') && !jsCode.includes('item.binary')) {
+              fileErrors.push(`Node '${node.name}' in ${file} strips binary data from output response!`);
+            }
+          }
+        }
+
         // Code node comments check: No comments containing 'mock' inside production code execution nodes
         if (node.type === 'n8n-nodes-base.code' && node.parameters && node.parameters.jsCode) {
           const jsCode = node.parameters.jsCode;
-          // Check for comments containing mock inside production JS code
           const commentMatches = jsCode.match(/(\/\/.*|\/\*[\s\S]*?\*\/)/g) || [];
           for (const comment of commentMatches) {
             if (/\bmock\b/i.test(comment) && !node.name.includes('Dev') && !node.name.includes('Fixture')) {
@@ -174,7 +211,7 @@ for (const file of files) {
         }
       }
 
-      // 10. Connection target existence check
+      // 12. Connection target existence check
       if (workflow.connections && typeof workflow.connections === 'object') {
         for (const sourceNode in workflow.connections) {
           if (!nodeNames.has(sourceNode)) {
@@ -198,7 +235,7 @@ for (const file of files) {
         }
       }
 
-      // 11. Response normalization check in response code nodes
+      // 13. Response normalization check in response code nodes
       const responseNodes = workflow.nodes.filter(n =>
         n.name.includes('Response') || n.name.includes('Normalize') || n.name.includes('Return')
       );
@@ -223,7 +260,7 @@ for (const file of files) {
     hasError = true;
     console.error(`❌ [${file}] Validation failed:\n   - ${fileErrors.join('\n   - ')}`);
   } else {
-    console.log(`✅ [${file}] Passed strict static validation`);
+    console.log(`✅ [${file}] Passed strict functional validation`);
   }
 }
 
@@ -232,6 +269,6 @@ if (hasError) {
   console.error(`FAILED: Validation failed for one or more files.`);
   process.exit(1);
 } else {
-  console.log(`SUCCESS: All ${totalChecked} workflow files passed strict static validation cleanly.`);
+  console.log(`SUCCESS: All ${totalChecked} workflow files passed strict functional validation cleanly.`);
   process.exit(0);
 }

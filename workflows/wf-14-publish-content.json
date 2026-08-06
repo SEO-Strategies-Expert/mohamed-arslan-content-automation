@@ -47,10 +47,10 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const jobId = $(\"01 Input Trigger\").item.json.jobId || ($json && $json.job_id);\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + jobId + \".\";\n} else {\n  if (row.approval_required && row.status !== \"APPROVED\") {\n    errorCode = \"APPROVAL_REQUIRED\";\n    errorMessage = \"Publishing requires human approval. Current status: \" + row.status + \".\";\n  }\n}\nreturn { jobId, job: row, ok: errorCode === null, errorCode, errorMessage };"
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + input.jobId;\n} else if (!row.api_base_url) {\n  errorCode = \"SITE_CONFIG_MISSING\";\n  errorMessage = \"site_configs api_base_url is missing or not configured for site_key \" + row.site_key;\n} else if (!row.content_id) {\n  errorCode = \"MISSING_CONTENT_ID\";\n  errorMessage = \"content_id is missing on job. Cannot publish without a valid content_id.\";\n} else if (row.approval_required && row.status !== \"APPROVED\") {\n  errorCode = \"APPROVAL_REQUIRED\";\n  errorMessage = \"Publishing requires human approval. Current status: \" + row.status;\n}\nreturn { jobId: input.jobId, job: row, ok: errorCode === null, errorCode, errorMessage };"
       },
       "id": "03820194-9128-4019-a829-109284019295",
-      "name": "03 Verify Approval State",
+      "name": "03 Verify Eligibility",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -84,7 +84,7 @@
         "options": {}
       },
       "id": "04829104-9128-4902-8172-910293810305",
-      "name": "04 State OK Check",
+      "name": "04 Eligibility Check Passed",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -95,13 +95,13 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE content_jobs SET status = 'PUBLISHING', updated_at = NOW() WHERE job_id = $1 AND status = 'APPROVED' RETURNING job_id, status;",
+        "query": "UPDATE content_jobs SET lock_key = $2, lock_expires_at = NOW() + INTERVAL '5 minutes', status = 'PUBLISHING', updated_at = NOW() WHERE job_id = $1 AND status = 'APPROVED' AND (lock_expires_at IS NULL OR lock_expires_at < NOW()) RETURNING job_id, lock_key, content_id;",
         "options": {
-          "queryReplacement": "={{ $json.jobId }}"
+          "queryReplacement": "={{ [$json.jobId, (\"LOCK-\" + Date.now())] }}"
         }
       },
       "id": "05820194-9128-4091-a829-102938102971",
-      "name": "05 Acquire Lock and Set PUBLISHING",
+      "name": "05 Acquire Lock and Set Status PUBLISHING",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
@@ -118,8 +118,22 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const locked = ($json && $json.job_id) ? true : false;\nconst base = $(\"03 Verify Eligibility\").item.json;\nif (!locked) {\n  return { ok: false, jobId: base.jobId, errorCode: \"PUBLISH_LOCKED\", errorMessage: \"Could not acquire publish lock or status is no longer APPROVED.\" };\n}\nreturn { ok: true, jobId: base.jobId, job: base.job };"
+      },
+      "id": "05B0194-9128-4091-a829-102938102971",
+      "name": "05B Verify Lock Acquired",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        128
+      ]
+    },
+    {
+      "parameters": {
         "method": "GET",
-        "url": "={{ $(\"03 Verify Approval State\").item.json.job.api_base_url }}/content/{{ $(\"03 Verify Approval State\").item.json.job.content_id || $(\"03 Verify Approval State\").item.json.job.job_id }}",
+        "url": "={{ $json.job.api_base_url }}/content/{{ $json.job.content_id }}",
         "options": {
           "timeout": 5000
         }
@@ -143,19 +157,67 @@
     },
     {
       "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobCtx = $(\"03 Verify Eligibility\").item.json.job;\nconst resp = $json || {};\nconst isSnapshotValid = !resp.error && resp.contentId && !resp.status;\nif (!isSnapshotValid) {\n  return {\n    ok: false,\n    jobId: jobCtx.job_id,\n    errorCode: \"SNAPSHOT_FETCH_FAILED\",\n    errorMessage: \"Failed to fetch existing content snapshot from Custom Site API GET endpoint. Cannot proceed with pre-publish revision snapshot.\"\n  };\n}\nreturn {\n  ok: true,\n  jobId: jobCtx.job_id,\n  contentId: jobCtx.content_id,\n  snapshot: resp\n};"
+      },
+      "id": "06B0194-9128-4091-a829-102938102972",
+      "name": "06B Validate Snapshot",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1230,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "06C0194-9128-4091-a829-102938102972",
+      "name": "06C Snapshot OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1340,
+        128
+      ]
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO content_revisions (job_id, content_id, revision_id, snapshot)\nVALUES ($1, $2, $3, $4::jsonb)\nRETURNING id, revision_id;",
         "options": {
-          "queryReplacement": "={{ [$(\"03 Verify Approval State\").item.json.job.job_id, ($(\"03 Verify Approval State\").item.json.job.content_id || $(\"03 Verify Approval State\").item.json.job.job_id), (\"REV-\" + Date.now()), JSON.stringify($json)] }}"
+          "queryReplacement": "={{ [$json.jobId, $json.contentId, (\"REV-\" + Date.now()), JSON.stringify($json.snapshot)] }}"
         }
       },
       "id": "07820194-9128-4091-a829-102938102972",
-      "name": "07 Create Revision Snapshot Record",
+      "name": "07 Save Revision Record",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        1344,
-        128
+        1460,
+        64
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -168,13 +230,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $(\"03 Verify Approval State\").item.json.job.api_base_url }}/content/{{ $(\"03 Verify Approval State\").item.json.job.job_id }}/publish",
+        "url": "={{ $(\"03 Verify Eligibility\").item.json.job.api_base_url }}/content/{{ $json.contentId }}/publish",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
               "name": "Idempotency-Key",
-              "value": "={{ $(\"03 Verify Approval State\").item.json.job.job_id }}-publish-v1"
+              "value": "={{ $(\"03 Verify Eligibility\").item.json.job.job_id }}-publish-v1"
             }
           ]
         },
@@ -187,8 +249,8 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        1568,
-        128
+        1680,
+        64
       ],
       "alwaysOutputData": true,
       "onError": "continueRegularOutput",
@@ -202,15 +264,15 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const jobCtx = $(\"03 Verify Approval State\").item.json.job;\nconst resp = $json || {};\nconst isSuccess = resp && resp.publishedUrls && typeof resp.publishedUrls === \"object\" && Object.keys(resp.publishedUrls).length > 0;\n\nif (!isSuccess) {\n  return {\n    ok: false,\n    jobId: jobCtx.job_id,\n    errorCode: \"PUBLISH_API_FAILED\",\n    errorMessage: (resp && resp.message) ? resp.message : \"Custom Site API publish request failed or returned invalid response.\"\n  };\n}\n\nreturn {\n  ok: true,\n  jobId: jobCtx.job_id,\n  contentId: resp.contentId || jobCtx.content_id || jobCtx.job_id,\n  publishedUrls: resp.publishedUrls\n};"
+        "jsCode": "const jobCtx = $(\"03 Verify Eligibility\").item.json.job;\nconst resp = $json || {};\nconst isSuccess = !resp.error && resp.publishedUrls && typeof resp.publishedUrls === \"object\" && Object.keys(resp.publishedUrls).length > 0;\n\nif (!isSuccess) {\n  return {\n    ok: false,\n    jobId: jobCtx.job_id,\n    errorCode: \"PUBLISH_API_FAILED\",\n    errorMessage: (resp && resp.message) ? resp.message : \"Custom Site API publish endpoint failed or returned invalid response.\"\n  };\n}\n\nreturn {\n  ok: true,\n  jobId: jobCtx.job_id,\n  contentId: resp.contentId || jobCtx.content_id,\n  publishedUrls: resp.publishedUrls\n};"
       },
       "id": "09820194-9128-4019-a829-109284019296",
       "name": "09 Evaluate Publish API Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1792,
-        128
+        1900,
+        64
       ]
     },
     {
@@ -243,25 +305,25 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        2016,
-        128
+        2120,
+        64
       ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE content_jobs SET status = 'VERIFYING', content_id = $2, published_urls = $3::jsonb, updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
+        "query": "UPDATE content_jobs SET status = 'VERIFYING', published_urls = $2::jsonb, lock_key = NULL, lock_expires_at = NULL, updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
         "options": {
-          "queryReplacement": "={{ [$json.jobId, $json.contentId, JSON.stringify($json.publishedUrls)] }}"
+          "queryReplacement": "={{ [$json.jobId, JSON.stringify($json.publishedUrls)] }}"
         }
       },
       "id": "11820194-9128-4091-a829-102938102974",
-      "name": "11 Update Job Status VERIFYING",
+      "name": "11 Update Status VERIFYING and Release Lock",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2240,
-        64
+        2340,
+        0
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -284,8 +346,8 @@
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2464,
-        64
+        2560,
+        0
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -305,25 +367,49 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2688,
-        64
+        2780,
+        0
       ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $2, updated_at = NOW() WHERE job_id = $1;",
+        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $2, lock_key = NULL, lock_expires_at = NULL, updated_at = NOW() WHERE job_id = $1;",
         "options": {
           "queryReplacement": "={{ [$json.jobId, $json.errorMessage] }}"
         }
       },
       "id": "14820194-9128-4091-a829-102938102976",
-      "name": "14 Set Status FAILED On Publish Error",
+      "name": "14 Set Status FAILED and Release Lock",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2240,
-        288
+        2340,
+        240
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'PUBLISH_FAILED', 'Mohamed Arslan — WF-14 Publish Content', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $execution.id, JSON.stringify({ error: $json.errorMessage, errorCode: $json.errorCode })] }}"
+        }
+      },
+      "id": "15820194-9128-4091-a829-102938102977",
+      "name": "15 Log Publish Error Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2560,
+        240
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -336,15 +422,15 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const res = $(\"09 Evaluate Publish API Response\").item.json || $json || {};\nconst code = res.errorCode || \"PUBLISH_ERROR\";\nconst message = res.errorMessage || \"An error occurred while publishing content.\";\nconst jobId = res.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+        "jsCode": "const res = $(\"09 Evaluate Publish API Response\").item.json || $(\"06B Validate Snapshot\").item.json || $json || {};\nconst code = res.errorCode || \"PUBLISH_ERROR\";\nconst message = res.errorMessage || \"An error occurred while publishing content.\";\nconst jobId = res.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
       },
       "id": "99820194-8172-4091-b812-701928301934",
       "name": "99 Build Error Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2464,
-        288
+        2780,
+        240
       ]
     },
     {
@@ -383,7 +469,7 @@
     },
     {
       "parameters": {
-        "content": "WF-14 Publish Content\nEnforces human approval, loads api_base_url from site_configs, fetches real pre-publish snapshot via GET, calls Custom Website API publish endpoint with Idempotency-Key header, and updates status to VERIFYING only upon API confirmation.",
+        "content": "WF-14 Publish Content\nEnforces human approval and non-empty content_id. Acquires DB lock with expiration, fetches real GET content snapshot, calls POST /content/{contentId}/publish with Idempotency-Key header, logs errors, releases lock on completion.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -415,29 +501,29 @@
       "main": [
         [
           {
-            "node": "03 Verify Approval State",
+            "node": "03 Verify Eligibility",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "03 Verify Approval State": {
+    "03 Verify Eligibility": {
       "main": [
         [
           {
-            "node": "04 State OK Check",
+            "node": "04 Eligibility Check Passed",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "04 State OK Check": {
+    "04 Eligibility Check Passed": {
       "main": [
         [
           {
-            "node": "05 Acquire Lock and Set PUBLISHING",
+            "node": "05 Acquire Lock and Set Status PUBLISHING",
             "type": "main",
             "index": 0
           }
@@ -451,7 +537,18 @@
         ]
       ]
     },
-    "05 Acquire Lock and Set PUBLISHING": {
+    "05 Acquire Lock and Set Status PUBLISHING": {
+      "main": [
+        [
+          {
+            "node": "05B Verify Lock Acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05B Verify Lock Acquired": {
       "main": [
         [
           {
@@ -466,14 +563,43 @@
       "main": [
         [
           {
-            "node": "07 Create Revision Snapshot Record",
+            "node": "06B Validate Snapshot",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "07 Create Revision Snapshot Record": {
+    "06B Validate Snapshot": {
+      "main": [
+        [
+          {
+            "node": "06C Snapshot OK Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06C Snapshot OK Check": {
+      "main": [
+        [
+          {
+            "node": "07 Save Revision Record",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "14 Set Status FAILED and Release Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Save Revision Record": {
       "main": [
         [
           {
@@ -510,21 +636,21 @@
       "main": [
         [
           {
-            "node": "11 Update Job Status VERIFYING",
+            "node": "11 Update Status VERIFYING and Release Lock",
             "type": "main",
             "index": 0
           }
         ],
         [
           {
-            "node": "14 Set Status FAILED On Publish Error",
+            "node": "14 Set Status FAILED and Release Lock",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "11 Update Job Status VERIFYING": {
+    "11 Update Status VERIFYING and Release Lock": {
       "main": [
         [
           {
@@ -546,7 +672,18 @@
         ]
       ]
     },
-    "14 Set Status FAILED On Publish Error": {
+    "14 Set Status FAILED and Release Lock": {
+      "main": [
+        [
+          {
+            "node": "15 Log Publish Error Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "15 Log Publish Error Event": {
       "main": [
         [
           {

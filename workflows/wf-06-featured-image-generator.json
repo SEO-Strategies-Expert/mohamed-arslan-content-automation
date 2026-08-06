@@ -35,7 +35,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst mode = j.mode || \"generate_background_and_render_text\";\nconst validModes = [\"existing_drive_image\", \"generate_background_and_render_text\", \"render_from_template\"];\nif (!validModes.includes(mode)) {\n  return {\n    ok: false,\n    errorCode: \"INVALID_MODE\",\n    errorMessage: \"Mode must be one of: \" + validModes.join(\", \")\n  };\n}\nreturn {\n  jobId: j.jobId || \"MOHAMED-ARSLAN-TEST\",\n  mode,\n  headline: j.headline || \"عنوان مقال تجريبي\",\n  subheadline: j.subheadline || \"نص فرعي توضيحي\",\n  driveFileId: j.driveFileId || null,\n  ok: true\n};"
+        "jsCode": "const j = $json || {};\nconst mode = j.mode || \"generate_background_and_render_text\";\nconst validModes = [\"existing_drive_image\", \"generate_background_and_render_text\", \"render_from_template\"];\nif (!validModes.includes(mode)) {\n  return {\n    ok: false,\n    errorCode: \"INVALID_MODE\",\n    errorMessage: \"Mode must be one of: \" + validModes.join(\", \")\n  };\n}\nreturn {\n  jobId: j.jobId || null,\n  mode,\n  headline: j.headline || \"\",\n  subheadline: j.subheadline || \"\",\n  driveFileId: j.driveFileId || null,\n  ok: true\n};"
       },
       "id": "02810294-8172-491a-b812-701928301926",
       "name": "02 Validate Parameters",
@@ -48,13 +48,33 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const p = $(\"02 Validate Parameters\").item.json;\n// Programmatic text rendering mock\nconst renderedTextOverlay = {\n  headlineText: p.headline,\n  subheadlineText: p.subheadline,\n  fontFamily: \"Inter, Cairo, sans-serif\",\n  logoPosition: \"top-right\",\n  safeAreaMarginPx: 40\n};\nreturn {\n  assetKey: \"featured-main\",\n  assetType: \"featured_image\",\n  generatorMode: p.mode,\n  renderedOverlay: renderedTextOverlay,\n  width: 1200,\n  height: 630,\n  mimeType: \"image/png\",\n  previewUrl: \"https://development.example.com/assets/featured-main.png\"\n};"
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
       "id": "03820194-9128-4019-a829-109284019286",
-      "name": "03 Render Programmatic Featured Image",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "name": "03 Parameter OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
       "position": [
         448,
         192
@@ -63,15 +83,43 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const img = $(\"03 Render Programmatic Featured Image\").item.json;\nconst p = $(\"02 Validate Parameters\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Featured image generated programmatically with clear text and safe areas.\",\n  data: img,\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"optimize_images\"]\n};"
+        "jsCode": "const p = $(\"02 Validate Parameters\").item.json;\nconst headline = p.headline || \"Featured Image\";\nconst subheadline = p.subheadline || \"\";\n\n// Generate real SVG image binary data with programmatic typography and safe area margins\nconst svgWidth = 1200;\nconst svgHeight = 630;\nconst svgContent = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${svgWidth}\" height=\"${svgHeight}\" viewBox=\"0 0 ${svgWidth} ${svgHeight}\">\n  <rect width=\"100%\" height=\"100%\" fill=\"#1e293b\"/>\n  <rect x=\"40\" y=\"40\" width=\"1120\" height=\"550\" fill=\"none\" stroke=\"#3b82f6\" stroke-width=\"4\" rx=\"16\"/>\n  <text x=\"80\" y=\"260\" fill=\"#ffffff\" font-family=\"sans-serif\" font-size=\"48\" font-weight=\"bold\">${headline.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>\n  <text x=\"80\" y=\"340\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"28\">${subheadline.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>\n  <text x=\"1080\" y=\"100\" fill=\"#3b82f6\" font-family=\"sans-serif\" font-size=\"24\" font-weight=\"bold\" text-anchor=\"end\">Mohamed Arslan</text>\n</svg>`;\n\nconst binaryBuffer = Buffer.from(svgContent, \"utf-8\");\nconst base64Data = binaryBuffer.toString(\"base64\");\n\nreturn {\n  json: {\n    jobId: p.jobId,\n    assetKey: \"featured-main\",\n    assetType: \"featured_image\",\n    generatorMode: p.mode,\n    width: svgWidth,\n    height: svgHeight,\n    fileSizeBytes: binaryBuffer.length,\n    mimeType: \"image/svg+xml\",\n    ok: true\n  },\n  binary: {\n    data: {\n      data: base64Data,\n      mimeType: \"image/svg+xml\",\n      fileName: \"featured-main.svg\",\n      fileExtension: \"svg\",\n      fileSize: `${binaryBuffer.length} B`\n    }\n  }\n};"
       },
       "id": "04829104-9128-4902-8172-910293810297",
-      "name": "04 Return Normalized Response",
+      "name": "04 Render SVG Featured Image Binary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         672,
-        192
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\nconst meta = item.json || {};\nconst hasBinary = item.binary && item.binary.data && item.binary.data.data;\n\nif (!hasBinary) {\n  return {\n    success: false,\n    jobId: meta.jobId || null,\n    status: \"FAILED\",\n    message: \"Featured image generation failed — no binary image output produced.\",\n    data: null,\n    warnings: [],\n    errors: [{ code: \"RENDER_FAILED\", language: null, path: null, message: \"Image renderer did not produce binary output data.\" }],\n    nextAllowedActions: [\"retry\", \"cancel\"]\n  };\n}\n\nreturn {\n  success: true,\n  jobId: meta.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Featured image binary generated successfully.\",\n  data: {\n    assetKey: meta.assetKey,\n    assetType: meta.assetType,\n    width: meta.width,\n    height: meta.height,\n    fileSizeBytes: meta.fileSizeBytes,\n    mimeType: meta.mimeType\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"optimize_images\"]\n};"
+      },
+      "id": "05820194-9128-4091-a829-102938102987",
+      "name": "05 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"INVALID_INPUT\";\nconst message = j.errorMessage || \"Invalid input parameters for featured image generator.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301936",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        352
       ]
     },
     {
@@ -122,7 +170,7 @@
     },
     {
       "parameters": {
-        "content": "WF-06 Featured Image Generator\nRenders featured image text and logo programmatically over template or AI background, ensuring exact font and safe area compliance.",
+        "content": "WF-06 Featured Image Generator\nRenders SVG featured image binary over templates with programmatic typography. Returns failure unless binary data is successfully produced.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -154,18 +202,36 @@
       "main": [
         [
           {
-            "node": "03 Render Programmatic Featured Image",
+            "node": "03 Parameter OK Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "03 Render Programmatic Featured Image": {
+    "03 Parameter OK Check": {
       "main": [
         [
           {
-            "node": "04 Return Normalized Response",
+            "node": "04 Render SVG Featured Image Binary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Render SVG Featured Image Binary": {
+      "main": [
+        [
+          {
+            "node": "05 Return Normalized Response",
             "type": "main",
             "index": 0
           }

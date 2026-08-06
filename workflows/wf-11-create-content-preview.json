@@ -23,13 +23,13 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT job_id, site_key, status, target_languages FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "query": "SELECT c.job_id, c.site_key, c.status, c.target_languages, s.api_base_url FROM content_jobs c LEFT JOIN site_configs s USING (site_key) WHERE c.job_id = $1 LIMIT 1;",
         "options": {
           "queryReplacement": "={{ $json.jobId }}"
         }
       },
       "id": "02810294-8172-491a-b812-701928301931",
-      "name": "02 Load Job Record",
+      "name": "02 Load Job Record and Site Config",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
@@ -119,7 +119,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://development.example.com/api/automation/v1/content/preview",
+        "url": "={{ $(\"03 Check Job State\").item.json.job.api_base_url }}/content/preview",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ jobId: $json.job_id }) }}",
@@ -136,19 +136,59 @@
         128
       ],
       "alwaysOutputData": true,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CUSTOM_SITE_API_CREDENTIAL_ID",
+          "name": "Custom Site API Auth"
+        }
+      }
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const jobCtx = $(\"03 Check Job State\").item.json.job;\nconst resp = $json || {};\nconst previewUrls = resp.previewUrls || {\n  ar: \"https://development.example.com/preview/ar/hair-transplant-cost-turkey\",\n  en: \"https://development.example.com/preview/en/hair-transplant-cost-turkey\"\n};\nreturn {\n  jobId: jobCtx.job_id,\n  previewUrls\n};"
+        "jsCode": "const jobCtx = $(\"03 Check Job State\").item.json.job;\nconst resp = $json || {};\nconst hasPreviews = resp && resp.previewUrls && typeof resp.previewUrls === \"object\" && Object.keys(resp.previewUrls).length > 0;\n\nif (!hasPreviews) {\n  return {\n    ok: false,\n    jobId: jobCtx.job_id,\n    errorCode: \"PREVIEW_CREATION_FAILED\",\n    errorMessage: (resp && resp.message) ? resp.message : \"Custom Site API failed to generate draft preview URLs.\"\n  };\n}\n\nreturn {\n  ok: true,\n  jobId: jobCtx.job_id,\n  previewUrls: resp.previewUrls\n};"
       },
       "id": "07820194-9128-4019-a829-109284019292",
-      "name": "07 Extract Preview URLs",
+      "name": "07 Evaluate Preview API Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         1344,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "08820194-9128-4091-a829-102938102964",
+      "name": "08 Preview Succeeded Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
         128
       ]
     },
@@ -160,13 +200,13 @@
           "queryReplacement": "={{ [$json.jobId, JSON.stringify($json.previewUrls)] }}"
         }
       },
-      "id": "08820194-9128-4091-a829-102938102964",
-      "name": "08 Update Status REVIEW_PENDING",
+      "id": "09820194-9128-4091-a829-102938102965",
+      "name": "09 Update Status REVIEW_PENDING",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        1568,
-        128
+        1792,
+        64
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -181,16 +221,16 @@
         "operation": "executeQuery",
         "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'REVIEW_PENDING', 'Mohamed Arslan — WF-11 Create Content Preview', $2, $3::jsonb);",
         "options": {
-          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ previewUrls: $(\"07 Extract Preview URLs\").item.json.previewUrls })] }}"
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ previewUrls: $(\"07 Evaluate Preview API Result\").item.json.previewUrls })] }}"
         }
       },
-      "id": "09820194-9128-4091-a829-102938102965",
-      "name": "09 Log Review Pending Event",
+      "id": "10820194-9128-4091-a829-102938102966",
+      "name": "10 Log Review Pending Event",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        1792,
-        128
+        2016,
+        64
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -203,29 +243,53 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const p = $(\"07 Extract Preview URLs\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"REVIEW_PENDING\",\n  message: \"Content preview created successfully and pending human review.\",\n  data: {\n    previewUrls: p.previewUrls\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"approve\", \"reject\", \"cancel\"]\n};"
+        "jsCode": "const p = $(\"07 Evaluate Preview API Result\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"REVIEW_PENDING\",\n  message: \"Content preview created successfully and pending human review.\",\n  data: {\n    previewUrls: p.previewUrls\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"approve\", \"reject\", \"cancel\"]\n};"
       },
-      "id": "10829104-9128-4902-8172-910293810302",
-      "name": "10 Return Normalized Response",
+      "id": "11829104-9128-4902-8172-910293810302",
+      "name": "11 Return Normalized Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2016,
-        128
+        2240,
+        64
       ]
     },
     {
       "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $2, updated_at = NOW() WHERE job_id = $1;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.errorMessage] }}"
+        }
+      },
+      "id": "12820194-9128-4091-a829-102938102967",
+      "name": "12 Set Status FAILED On Preview Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1792,
+        288
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An error occurred while creating content preview.\";\nconst jobId = j.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+        "jsCode": "const res = $(\"07 Evaluate Preview API Result\").item.json || $json || {};\nconst code = res.errorCode || \"PREVIEW_CREATION_FAILED\";\nconst message = res.errorMessage || \"An error occurred while creating content preview.\";\nconst jobId = res.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
       },
       "id": "99820194-8172-4091-b812-701928301932",
       "name": "99 Build Error Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        672,
-        352
+        2016,
+        288
       ]
     },
     {
@@ -264,7 +328,7 @@
     },
     {
       "parameters": {
-        "content": "WF-11 Create Content Preview\nCalls Custom Website API preview endpoint POST /api/automation/v1/content/preview, stores preview_urls, and updates status to REVIEW_PENDING.",
+        "content": "WF-11 Create Content Preview\nCalls Custom Website API preview endpoint POST /api/automation/v1/content/preview, stores returned preview_urls, and updates status to REVIEW_PENDING.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -285,14 +349,14 @@
       "main": [
         [
           {
-            "node": "02 Load Job Record",
+            "node": "02 Load Job Record and Site Config",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "02 Load Job Record": {
+    "02 Load Job Record and Site Config": {
       "main": [
         [
           {
@@ -347,40 +411,69 @@
       "main": [
         [
           {
-            "node": "07 Extract Preview URLs",
+            "node": "07 Evaluate Preview API Result",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "07 Extract Preview URLs": {
+    "07 Evaluate Preview API Result": {
       "main": [
         [
           {
-            "node": "08 Update Status REVIEW_PENDING",
+            "node": "08 Preview Succeeded Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "08 Update Status REVIEW_PENDING": {
+    "08 Preview Succeeded Check": {
       "main": [
         [
           {
-            "node": "09 Log Review Pending Event",
+            "node": "09 Update Status REVIEW_PENDING",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "12 Set Status FAILED On Preview Error",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "09 Log Review Pending Event": {
+    "09 Update Status REVIEW_PENDING": {
       "main": [
         [
           {
-            "node": "10 Return Normalized Response",
+            "node": "10 Log Review Pending Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Log Review Pending Event": {
+      "main": [
+        [
+          {
+            "node": "11 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12 Set Status FAILED On Preview Error": {
+      "main": [
+        [
+          {
+            "node": "99 Build Error Response",
             "type": "main",
             "index": 0
           }
@@ -402,7 +495,7 @@
       "main": [
         [
           {
-            "node": "02 Load Job Record",
+            "node": "02 Load Job Record and Site Config",
             "type": "main",
             "index": 0
           }

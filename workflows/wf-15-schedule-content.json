@@ -26,13 +26,13 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT job_id, status, content_id FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "query": "SELECT c.job_id, c.status, c.content_id, s.api_base_url FROM content_jobs c LEFT JOIN site_configs s USING (site_key) WHERE c.job_id = $1 LIMIT 1;",
         "options": {
           "queryReplacement": "={{ $json.jobId }}"
         }
       },
       "id": "02810294-8172-491a-b812-701928301937",
-      "name": "02 Load Job Details",
+      "name": "02 Load Job Details and Site Config",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
@@ -50,7 +50,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nconst defaultPublishAt = new Date(Date.now() + 86400000).toISOString(); // +24h\nconst scheduledAt = input.publishAt || defaultPublishAt;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + input.jobId;\n}\nreturn { jobId: input.jobId, scheduledAt, ok: errorCode === null, errorCode, errorMessage };"
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + input.jobId;\n} else if (!input.publishAt) {\n  errorCode = \"INVALID_INPUT\";\n  errorMessage = \"publishAt timestamp ISO string is required for scheduling.\";\n}\nreturn { jobId: input.jobId, job: row, scheduledAt: input.publishAt, ok: errorCode === null, errorCode, errorMessage };"
       },
       "id": "03820194-9128-4019-a829-109284019297",
       "name": "03 Check Schedule Eligibility",
@@ -63,35 +63,45 @@
     },
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "UPDATE content_jobs SET status = 'SCHEDULED', scheduled_at = $2::timestamptz, updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status, scheduled_at;",
-        "options": {
-          "queryReplacement": "={{ [$json.jobId, $json.scheduledAt] }}"
-        }
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
       "id": "04820194-9128-4091-a829-102938102975",
-      "name": "04 Update Job Status SCHEDULED",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2.7,
+      "name": "04 Schedule Input OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
       "position": [
         672,
-        128
-      ],
-      "alwaysOutputData": true,
-      "credentials": {
-        "postgres": {
-          "id": "POSTGRES_CREDENTIAL_ID",
-          "name": "Postgres account"
-        }
-      }
+        192
+      ]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://development.example.com/api/automation/v1/content/{{ $json.job_id }}/schedule",
+        "url": "={{ $(\"03 Check Schedule Eligibility\").item.json.job.api_base_url }}/content/{{ $(\"03 Check Schedule Eligibility\").item.json.job.content_id || $(\"03 Check Schedule Eligibility\").item.json.job.job_id }}/schedule",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ scheduledAt: $json.scheduled_at }) }}",
+        "jsonBody": "={{ JSON.stringify({ scheduledAt: $json.scheduledAt }) }}",
         "options": {
           "timeout": 5000
         }
@@ -105,23 +115,101 @@
         128
       ],
       "alwaysOutputData": true,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CUSTOM_SITE_API_CREDENTIAL_ID",
+          "name": "Custom Site API Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"03 Check Schedule Eligibility\").item.json;\nconst resp = $json || {};\nconst isSuccess = !resp.error && (resp.success !== false);\nif (!isSuccess) {\n  return {\n    ok: false,\n    jobId: input.jobId,\n    errorCode: \"SCHEDULE_API_FAILED\",\n    errorMessage: (resp && resp.message) ? resp.message : \"Custom Site API schedule endpoint returned an error.\"\n  };\n}\nreturn { ok: true, jobId: input.jobId, scheduledAt: input.scheduledAt };"
+      },
+      "id": "06820194-9128-4019-a829-109284019298",
+      "name": "06 Evaluate Schedule API Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "07820194-9128-4091-a829-102938102976",
+      "name": "07 Schedule Succeeded Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'SCHEDULED', scheduled_at = $2::timestamptz, updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status, scheduled_at;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.scheduledAt] }}"
+        }
+      },
+      "id": "08820194-9128-4091-a829-102938102977",
+      "name": "08 Update Job Status SCHEDULED",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1568,
+        64
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
     },
     {
       "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'SCHEDULED', 'Mohamed Arslan — WF-15 Schedule Content', $2, $3::jsonb);",
         "options": {
-          "queryReplacement": "={{ [$json.job_id || $(\"03 Check Schedule Eligibility\").item.json.jobId, $execution.id, JSON.stringify({ scheduledAt: $(\"03 Check Schedule Eligibility\").item.json.scheduledAt })] }}"
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ scheduledAt: $json.scheduled_at })] }}"
         }
       },
-      "id": "06820194-9128-4091-a829-102938102976",
-      "name": "06 Log Schedule Event",
+      "id": "09820194-9128-4091-a829-102938102978",
+      "name": "09 Log Schedule Event",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        1120,
-        128
+        1792,
+        64
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -134,29 +222,53 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const s = $(\"03 Check Schedule Eligibility\").item.json;\nreturn {\n  success: true,\n  jobId: s.jobId,\n  status: \"SCHEDULED\",\n  message: \"Content job scheduled for publication at \" + s.scheduledAt,\n  data: {\n    scheduledAt: s.scheduledAt\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"cancel\"]\n};"
+        "jsCode": "const s = $(\"06 Evaluate Schedule API Result\").item.json;\nreturn {\n  success: true,\n  jobId: s.jobId,\n  status: \"SCHEDULED\",\n  message: \"Content job scheduled for publication at \" + s.scheduledAt,\n  data: {\n    scheduledAt: s.scheduledAt\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"cancel\"]\n};"
       },
-      "id": "07829104-9128-4902-8172-910293810307",
-      "name": "07 Return Normalized Response",
+      "id": "10829104-9128-4902-8172-910293810307",
+      "name": "10 Return Normalized Success Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1344,
-        128
+        2016,
+        64
       ]
     },
     {
       "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $2, updated_at = NOW() WHERE job_id = $1;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.errorMessage] }}"
+        }
+      },
+      "id": "11820194-9128-4091-a829-102938102979",
+      "name": "11 Set Status FAILED On Schedule Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1568,
+        288
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An error occurred while scheduling content.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+        "jsCode": "const j = $(\"06 Evaluate Schedule API Result\").item.json || $json || {};\nconst code = j.errorCode || \"SCHEDULE_FAILED\";\nconst message = j.errorMessage || \"An error occurred while scheduling content.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
       },
       "id": "99820194-8172-4091-b812-701928301935",
       "name": "99 Build Error Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        448,
-        352
+        1792,
+        288
       ]
     },
     {
@@ -201,7 +313,7 @@
     },
     {
       "parameters": {
-        "content": "WF-15 Schedule Content\nSchedules approved content publication via Custom Website API POST /api/automation/v1/content/{id}/schedule and sets job status to SCHEDULED.",
+        "content": "WF-15 Schedule Content\nSchedules approved content publication via Custom Website API POST /api/automation/v1/content/{id}/schedule (loaded from site_configs) and sets job status to SCHEDULED.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -222,14 +334,14 @@
       "main": [
         [
           {
-            "node": "02 Load Job Details",
+            "node": "02 Load Job Details and Site Config",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "02 Load Job Details": {
+    "02 Load Job Details and Site Config": {
       "main": [
         [
           {
@@ -244,7 +356,18 @@
       "main": [
         [
           {
-            "node": "04 Update Job Status SCHEDULED",
+            "node": "04 Schedule Input OK Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Schedule Input OK Check": {
+      "main": [
+        [
+          {
+            "node": "05 Call Schedule API Adapter",
             "type": "main",
             "index": 0
           }
@@ -258,33 +381,73 @@
         ]
       ]
     },
-    "04 Update Job Status SCHEDULED": {
-      "main": [
-        [
-          {
-            "node": "05 Call Schedule API Adapter",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "05 Call Schedule API Adapter": {
       "main": [
         [
           {
-            "node": "06 Log Schedule Event",
+            "node": "06 Evaluate Schedule API Result",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "06 Log Schedule Event": {
+    "06 Evaluate Schedule API Result": {
       "main": [
         [
           {
-            "node": "07 Return Normalized Response",
+            "node": "07 Schedule Succeeded Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Schedule Succeeded Check": {
+      "main": [
+        [
+          {
+            "node": "08 Update Job Status SCHEDULED",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "11 Set Status FAILED On Schedule Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Update Job Status SCHEDULED": {
+      "main": [
+        [
+          {
+            "node": "09 Log Schedule Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Log Schedule Event": {
+      "main": [
+        [
+          {
+            "node": "10 Return Normalized Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 Set Status FAILED On Schedule Error": {
+      "main": [
+        [
+          {
+            "node": "99 Build Error Response",
             "type": "main",
             "index": 0
           }
@@ -306,7 +469,7 @@
       "main": [
         [
           {
-            "node": "02 Load Job Details",
+            "node": "02 Load Job Details and Site Config",
             "type": "main",
             "index": 0
           }

@@ -10,9 +10,6 @@
             },
             {
               "name": "assetKey"
-            },
-            {
-              "name": "sourceUrl"
             }
           ]
         }
@@ -29,10 +26,10 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst assetKey = j.assetKey || \"featured-main\";\nconst jobId = j.jobId || \"MOHAMED-ARSLAN-TEST\";\nreturn {\n  jobId,\n  assetKey,\n  originalWidth: 1920,\n  originalHeight: 1080,\n  optimizedWidth: 1200,\n  optimizedHeight: 630,\n  fileSizeBytes: 84520,\n  mimeType: \"image/webp\",\n  checksum: \"a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef\",\n  optimizedUrl: \"https://development.example.com/assets/optimized-\" + assetKey + \".webp\"\n};"
+        "jsCode": "const item = $input.item;\nconst j = item.json || {};\nconst jobId = j.jobId || null;\nconst assetKey = j.assetKey || \"featured-main\";\n\nconst binaryObj = item.binary && item.binary.data ? item.binary.data : null;\nif (!binaryObj || !binaryObj.data) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      errorCode: \"MISSING_BINARY_IMAGE\",\n      errorMessage: \"No binary image data supplied for image optimization.\"\n    }\n  };\n}\n\nconst crypto = require(\"crypto\");\nconst binaryBuffer = Buffer.from(binaryObj.data, \"base64\");\nconst fileSizeBytes = binaryBuffer.length;\nconst checksum = crypto.createHash(\"sha256\").update(binaryBuffer).digest(\"hex\");\nconst mimeType = binaryObj.mimeType || \"image/webp\";\n\nreturn {\n  json: {\n    ok: true,\n    jobId,\n    assetKey,\n    fileSizeBytes,\n    checksum,\n    mimeType\n  },\n  binary: item.binary\n};"
       },
       "id": "02810294-8172-491a-b812-701928301929",
-      "name": "02 Optimize and Convert WebP",
+      "name": "02 Calculate Binary Image Metadata",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -42,16 +39,64 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const opt = $(\"02 Optimize and Convert WebP\").item.json;\nreturn {\n  success: true,\n  jobId: opt.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Image optimized and converted to WebP format successfully.\",\n  data: opt,\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"upload_media\"]\n};"
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "03820194-9128-4019-a829-109284019289",
-      "name": "03 Return Normalized Response",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "03820194-9128-4019-a829-109284019299",
+      "name": "03 Binary Check Passed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
       "position": [
         448,
         192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const opt = $json;\nreturn {\n  success: true,\n  jobId: opt.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Image binary metadata and SHA-256 checksum calculated successfully.\",\n  data: {\n    assetKey: opt.assetKey,\n    fileSizeBytes: opt.fileSizeBytes,\n    checksum: opt.checksum,\n    mimeType: opt.mimeType\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"upload_media\"]\n};"
+      },
+      "id": "04829104-9128-4902-8172-910293810314",
+      "name": "04 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"MISSING_BINARY_IMAGE\";\nconst message = j.errorMessage || \"No binary image input supplied for optimization.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301938",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        352
       ]
     },
     {
@@ -96,7 +141,7 @@
     },
     {
       "parameters": {
-        "content": "WF-09 Optimize Images\nCompresses images, generates WebP versions, and calculates checksum and dimensions metadata for media registration.",
+        "content": "WF-09 Optimize Images\nRequires actual binary image input. Calculates real SHA-256 checksum and byte size from input binary, failing safely if binary data is missing.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -117,18 +162,36 @@
       "main": [
         [
           {
-            "node": "02 Optimize and Convert WebP",
+            "node": "02 Calculate Binary Image Metadata",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "02 Optimize and Convert WebP": {
+    "02 Calculate Binary Image Metadata": {
       "main": [
         [
           {
-            "node": "03 Return Normalized Response",
+            "node": "03 Binary Check Passed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Binary Check Passed": {
+      "main": [
+        [
+          {
+            "node": "04 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
             "type": "main",
             "index": 0
           }
@@ -150,7 +213,7 @@
       "main": [
         [
           {
-            "node": "02 Optimize and Convert WebP",
+            "node": "02 Calculate Binary Image Metadata",
             "type": "main",
             "index": 0
           }

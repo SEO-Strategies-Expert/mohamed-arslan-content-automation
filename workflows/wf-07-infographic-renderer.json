@@ -32,7 +32,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst template = j.template || \"cost-breakdown\";\nconst validTemplates = [\n  \"stats-grid\", \"process-steps\", \"comparison\", \"timeline\",\n  \"checklist\", \"cost-breakdown\", \"before-after-explanation\", \"faq-summary\"\n];\nif (!validTemplates.includes(template)) {\n  return {\n    ok: false,\n    errorCode: \"INVALID_TEMPLATE\",\n    errorMessage: \"template must be one of: \" + validTemplates.join(\", \")\n  };\n}\nreturn {\n  jobId: j.jobId || \"MOHAMED-ARSLAN-TEST\",\n  template,\n  title: j.title || \"رسم توضيحي تفصيلي\",\n  data: j.data || {},\n  ok: true\n};"
+        "jsCode": "const j = $json || {};\nconst template = j.template || \"cost-breakdown\";\nconst validTemplates = [\n  \"stats-grid\", \"process-steps\", \"comparison\", \"timeline\",\n  \"checklist\", \"cost-breakdown\", \"before-after-explanation\", \"faq-summary\"\n];\nif (!validTemplates.includes(template)) {\n  return {\n    ok: false,\n    errorCode: \"INVALID_TEMPLATE\",\n    errorMessage: \"template must be one of: \" + validTemplates.join(\", \")\n  };\n}\nreturn {\n  jobId: j.jobId || null,\n  template,\n  title: j.title || \"Infographic\",\n  data: j.data || {},\n  ok: true\n};"
       },
       "id": "02810294-8172-491a-b812-701928301927",
       "name": "02 Validate Infographic Template",
@@ -45,13 +45,33 @@
     },
     {
       "parameters": {
-        "mode": "runOnceForEachItem",
-        "jsCode": "const p = $(\"02 Validate Infographic Template\").item.json;\nreturn {\n  assetKey: \"infographic-\" + p.template + \"-1\",\n  assetType: \"infographic\",\n  template: p.template,\n  renderedTitle: p.title,\n  width: 1080,\n  height: 1080,\n  mimeType: \"image/png\",\n  previewUrl: \"https://development.example.com/assets/infographic-\" + p.template + \".png\"\n};"
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
       "id": "03820194-9128-4019-a829-109284019287",
-      "name": "03 Render SVG Infographic Template",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "name": "03 Template OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
       "position": [
         448,
         192
@@ -60,15 +80,43 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const ig = $(\"03 Render SVG Infographic Template\").item.json;\nconst p = $(\"02 Validate Infographic Template\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Infographic rendered successfully using template: \" + p.template,\n  data: ig,\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"optimize_images\"]\n};"
+        "jsCode": "const p = $(\"02 Validate Infographic Template\").item.json;\nconst title = p.title || \"Infographic\";\nconst template = p.template;\nconst width = 1080;\nconst height = 1080;\n\nconst svgContent = `<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"${width}\" height=\"${height}\" viewBox=\"0 0 ${width} ${height}\">\n  <rect width=\"100%\" height=\"100%\" fill=\"#0f172a\"/>\n  <rect x=\"30\" y=\"30\" width=\"1020\" height=\"1020\" fill=\"none\" stroke=\"#38bdf8\" stroke-width=\"4\" rx=\"24\"/>\n  <text x=\"60\" y=\"120\" fill=\"#38bdf8\" font-family=\"sans-serif\" font-size=\"40\" font-weight=\"bold\">${title.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</text>\n  <text x=\"60\" y=\"180\" fill=\"#94a3b8\" font-family=\"sans-serif\" font-size=\"24\">Template: ${template}</text>\n  <g transform=\"translate(60, 240)\">\n    <rect x=\"0\" y=\"0\" width=\"960\" height=\"180\" fill=\"#1e293b\" rx=\"12\"/>\n    <text x=\"30\" y=\"105\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"28\">1. Analysis &amp; Research</text>\n  </g>\n  <g transform=\"translate(60, 460)\">\n    <rect x=\"0\" y=\"0\" width=\"960\" height=\"180\" fill=\"#1e293b\" rx=\"12\"/>\n    <text x=\"30\" y=\"105\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"28\">2. Technical Cost Breakdown</text>\n  </g>\n  <g transform=\"translate(60, 680)\">\n    <rect x=\"0\" y=\"0\" width=\"960\" height=\"180\" fill=\"#1e293b\" rx=\"12\"/>\n    <text x=\"30\" y=\"105\" fill=\"#f8fafc\" font-family=\"sans-serif\" font-size=\"28\">3. Final Recommendations</text>\n  </g>\n</svg>`;\n\nconst binaryBuffer = Buffer.from(svgContent, \"utf-8\");\nconst base64Data = binaryBuffer.toString(\"base64\");\n\nreturn {\n  json: {\n    jobId: p.jobId,\n    assetKey: `infographic-${template}-1`,\n    assetType: \"infographic\",\n    template,\n    width,\n    height,\n    fileSizeBytes: binaryBuffer.length,\n    mimeType: \"image/svg+xml\",\n    ok: true\n  },\n  binary: {\n    data: {\n      data: base64Data,\n      mimeType: \"image/svg+xml\",\n      fileName: `infographic-${template}.svg`,\n      fileExtension: \"svg\",\n      fileSize: `${binaryBuffer.length} B`\n    }\n  }\n};"
       },
       "id": "04829104-9128-4902-8172-910293810298",
-      "name": "04 Return Normalized Response",
+      "name": "04 Render SVG Infographic Binary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         672,
-        192
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\nconst meta = item.json || {};\nconst hasBinary = item.binary && item.binary.data && item.binary.data.data;\n\nif (!hasBinary) {\n  return {\n    success: false,\n    jobId: meta.jobId || null,\n    status: \"FAILED\",\n    message: \"Infographic rendering failed — no binary image output produced.\",\n    data: null,\n    warnings: [],\n    errors: [{ code: \"RENDER_FAILED\", language: null, path: null, message: \"Infographic renderer did not produce binary output data.\" }],\n    nextAllowedActions: [\"retry\", \"cancel\"]\n  };\n}\n\nreturn {\n  success: true,\n  jobId: meta.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Infographic rendered successfully using template: \" + meta.template,\n  data: {\n    assetKey: meta.assetKey,\n    assetType: meta.assetType,\n    template: meta.template,\n    width: meta.width,\n    height: meta.height,\n    fileSizeBytes: meta.fileSizeBytes,\n    mimeType: meta.mimeType\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"optimize_images\"]\n};"
+      },
+      "id": "05820194-9128-4091-a829-102938102988",
+      "name": "05 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"INVALID_TEMPLATE\";\nconst message = j.errorMessage || \"Invalid infographic template selection.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301937",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        352
       ]
     },
     {
@@ -119,7 +167,7 @@
     },
     {
       "parameters": {
-        "content": "WF-07 Infographic Renderer\nRenders high-quality infographics for supported templates: stats-grid, process-steps, comparison, timeline, checklist, cost-breakdown, before-after-explanation, faq-summary.",
+        "content": "WF-07 Infographic Renderer\nRenders real binary SVG infographics for supported templates. Returns failure unless binary data is produced.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -151,18 +199,36 @@
       "main": [
         [
           {
-            "node": "03 Render SVG Infographic Template",
+            "node": "03 Template OK Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "03 Render SVG Infographic Template": {
+    "03 Template OK Check": {
       "main": [
         [
           {
-            "node": "04 Return Normalized Response",
+            "node": "04 Render SVG Infographic Binary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Render SVG Infographic Binary": {
+      "main": [
+        [
+          {
+            "node": "05 Return Normalized Response",
             "type": "main",
             "index": 0
           }

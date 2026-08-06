@@ -23,7 +23,7 @@ In accordance with security requirements, all real credential IDs, webhook IDs, 
 - **Google Drive Credential ID**: `"GOOGLE_DRIVE_CREDENTIAL_ID"`
 - **Telegram Token Placeholder**: `TELEGRAM_BOT_TOKEN_PLACEHOLDER`
 - **Telegram Chat ID Placeholder**: `TELEGRAM_CHAT_ID_PLACEHOLDER`
-- **Custom Site API Base URL**: `https://development.example.com`
+- **Custom Site API Base URL**: `CUSTOM_SITE_API_BASE_URL_PLACEHOLDER`
 - **Custom Site API Token**: `CUSTOM_SITE_API_TOKEN`
 
 ---

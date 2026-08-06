@@ -25,37 +25,67 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "=https://development.example.com/api/automation/v1/content/{{ $json.contentId || ($json.jobId + '-CNT') }}",
+        "operation": "executeQuery",
+        "query": "SELECT c.job_id, c.site_key, c.status, c.content_id, s.api_base_url FROM content_jobs c LEFT JOIN site_configs s USING (site_key) WHERE c.job_id = $1 LIMIT 1;",
         "options": {
-          "timeout": 5000
+          "queryReplacement": "={{ $json.jobId }}"
         }
       },
       "id": "02810294-8172-491a-b812-701928301939",
-      "name": "02 Fetch Current Page State",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.5,
+      "name": "02 Load Job Details and Site Config",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
       "position": [
         224,
         192
       ],
       "alwaysOutputData": true,
-      "onError": "continueRegularOutput"
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $(\"02 Load Job Details and Site Config\").item.json.api_base_url }}/content/{{ $json.content_id || $(\"01 Input Trigger\").item.json.contentId || $(\"01 Input Trigger\").item.json.jobId }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "03810294-8172-491a-b812-701928301940",
+      "name": "03 Fetch Current Page Content Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        192
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CUSTOM_SITE_API_CREDENTIAL_ID",
+          "name": "Custom Site API Auth"
+        }
+      }
     },
     {
       "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO content_revisions (job_id, content_id, revision_id, snapshot)\nVALUES ($1, $2, $3, $4::jsonb)\nRETURNING id, revision_id;",
         "options": {
-          "queryReplacement": "={{ [$(\"01 Input Trigger\").item.json.jobId, $(\"01 Input Trigger\").item.json.contentId, (\"REV-UPDATE-\" + Date.now()), JSON.stringify($json)] }}"
+          "queryReplacement": "={{ [$(\"01 Input Trigger\").item.json.jobId, ($(\"02 Load Job Details and Site Config\").item.json.content_id || $(\"01 Input Trigger\").item.json.contentId || $(\"01 Input Trigger\").item.json.jobId), (\"PRE-PATCH-\" + Date.now()), JSON.stringify($json)] }}"
         }
       },
-      "id": "03820194-9128-4091-a829-102938102977",
-      "name": "03 Save Pre-Update Revision Snapshot",
+      "id": "04820194-9128-4091-a829-102938102978",
+      "name": "04 Create Pre-Update Revision Record",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        448,
+        672,
         192
       ],
       "alwaysOutputData": true,
@@ -69,7 +99,7 @@
     {
       "parameters": {
         "method": "PATCH",
-        "url": "=https://development.example.com/api/automation/v1/content/{{ $(\"01 Input Trigger\").item.json.contentId }}",
+        "url": "={{ $(\"02 Load Job Details and Site Config\").item.json.api_base_url }}/content/{{ $(\"02 Load Job Details and Site Config\").item.json.content_id || $(\"01 Input Trigger\").item.json.contentId || $(\"01 Input Trigger\").item.json.jobId }}",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ jobId: $(\"01 Input Trigger\").item.json.jobId, updateMode: \"patch\" }) }}",
@@ -77,32 +107,86 @@
           "timeout": 5000
         }
       },
-      "id": "04810294-8172-491a-b812-701928301940",
-      "name": "04 Apply Patch Via Custom Site API Adapter",
+      "id": "05810294-8172-491a-b812-701928301941",
+      "name": "05 Call Custom Site Patch API Adapter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        672,
+        896,
         192
       ],
       "alwaysOutputData": true,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CUSTOM_SITE_API_CREDENTIAL_ID",
+          "name": "Custom Site API Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst resp = $json || {};\nconst isSuccess = !resp.error && (resp.success !== false);\nif (!isSuccess) {\n  return {\n    ok: false,\n    jobId: input.jobId,\n    errorCode: \"UPDATE_API_FAILED\",\n    errorMessage: (resp && resp.message) ? resp.message : \"Custom Site API patch update endpoint returned an error.\"\n  };\n}\nreturn { ok: true, jobId: input.jobId, contentId: input.contentId || input.jobId };"
+      },
+      "id": "06820194-9128-4019-a829-109284019299",
+      "name": "06 Evaluate Patch API Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "07820194-9128-4091-a829-102938102979",
+      "name": "07 Patch Succeeded Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        192
+      ]
     },
     {
       "parameters": {
         "operation": "executeQuery",
         "query": "UPDATE content_jobs SET status = 'VERIFYING', updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
         "options": {
-          "queryReplacement": "={{ $(\"01 Input Trigger\").item.json.jobId }}"
+          "queryReplacement": "={{ [$json.jobId] }}"
         }
       },
-      "id": "05820194-9128-4091-a829-102938102978",
-      "name": "05 Update Status VERIFYING",
+      "id": "08820194-9128-4091-a829-102938102980",
+      "name": "08 Update Job Status VERIFYING",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        896,
-        192
+        1568,
+        128
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -115,15 +199,53 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nreturn {\n  success: true,\n  jobId: input.jobId,\n  status: \"VERIFYING\",\n  message: \"Existing page content updated via PATCH. Verification in progress.\",\n  data: {\n    contentId: input.contentId\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"verify\", \"rollback\"]\n};"
+        "jsCode": "const u = $(\"06 Evaluate Patch API Response\").item.json;\nreturn {\n  success: true,\n  jobId: u.jobId,\n  status: \"VERIFYING\",\n  message: \"Existing page content updated via Custom Site API PATCH. Verification in progress.\",\n  data: {\n    contentId: u.contentId\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"verify\", \"rollback\"]\n};"
       },
-      "id": "06829104-9128-4902-8172-910293810308",
-      "name": "06 Return Normalized Response",
+      "id": "09829104-9128-4902-8172-910293810308",
+      "name": "09 Return Normalized Success Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1120,
-        192
+        1792,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $2, updated_at = NOW() WHERE job_id = $1;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.errorMessage] }}"
+        }
+      },
+      "id": "10820194-9128-4091-a829-102938102981",
+      "name": "10 Set Status FAILED On Update Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1568,
+        320
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $(\"06 Evaluate Patch API Response\").item.json || $json || {};\nconst code = j.errorCode || \"UPDATE_FAILED\";\nconst message = j.errorMessage || \"An error occurred while updating existing page content.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301936",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        320
       ]
     },
     {
@@ -151,7 +273,7 @@
               "id": "a2",
               "name": "contentId",
               "type": "string",
-              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001-CNT"
+              "value": "CNT-98124"
             }
           ]
         },
@@ -168,7 +290,7 @@
     },
     {
       "parameters": {
-        "content": "WF-16 Update Existing Page\nFetches current production page snapshot, saves content_revisions record, applies PATCH via Custom Website API, and moves job to VERIFYING.",
+        "content": "WF-16 Update Existing Page\nFetches current content via GET, takes pre-update revision snapshot, applies PATCH via Custom Website API, and sets status to VERIFYING.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -189,51 +311,102 @@
       "main": [
         [
           {
-            "node": "02 Fetch Current Page State",
+            "node": "02 Load Job Details and Site Config",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "02 Fetch Current Page State": {
+    "02 Load Job Details and Site Config": {
       "main": [
         [
           {
-            "node": "03 Save Pre-Update Revision Snapshot",
+            "node": "03 Fetch Current Page Content Snapshot",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "03 Save Pre-Update Revision Snapshot": {
+    "03 Fetch Current Page Content Snapshot": {
       "main": [
         [
           {
-            "node": "04 Apply Patch Via Custom Site API Adapter",
+            "node": "04 Create Pre-Update Revision Record",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "04 Apply Patch Via Custom Site API Adapter": {
+    "04 Create Pre-Update Revision Record": {
       "main": [
         [
           {
-            "node": "05 Update Status VERIFYING",
+            "node": "05 Call Custom Site Patch API Adapter",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "05 Update Status VERIFYING": {
+    "05 Call Custom Site Patch API Adapter": {
       "main": [
         [
           {
-            "node": "06 Return Normalized Response",
+            "node": "06 Evaluate Patch API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Evaluate Patch API Response": {
+      "main": [
+        [
+          {
+            "node": "07 Patch Succeeded Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Patch Succeeded Check": {
+      "main": [
+        [
+          {
+            "node": "08 Update Job Status VERIFYING",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "10 Set Status FAILED On Update Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Update Job Status VERIFYING": {
+      "main": [
+        [
+          {
+            "node": "09 Return Normalized Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Set Status FAILED On Update Error": {
+      "main": [
+        [
+          {
+            "node": "99 Build Error Response",
             "type": "main",
             "index": 0
           }
@@ -255,7 +428,7 @@
       "main": [
         [
           {
-            "node": "02 Fetch Current Page State",
+            "node": "02 Load Job Details and Site Config",
             "type": "main",
             "index": 0
           }

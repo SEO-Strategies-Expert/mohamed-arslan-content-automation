@@ -85,11 +85,11 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO site_configs\n  (site_key, environment, base_url, api_base_url, default_language, supported_languages, brand_config, publishing_policy, iframe_allowlist, active)\nVALUES\n  ('mohamed-arslan-test-site', 'development', 'https://development.example.com', 'https://development.example.com/api/automation/v1', 'ar', '[\"ar\",\"en\"]'::jsonb, '{}'::jsonb, '{}'::jsonb, '[\"www.youtube.com\",\"player.vimeo.com\"]'::jsonb, TRUE)\nON CONFLICT (site_key) DO NOTHING\nRETURNING site_key;",
+        "query": "INSERT INTO site_configs\n  (site_key, environment, base_url, api_base_url, default_language, supported_languages, brand_config, publishing_policy, iframe_allowlist, active)\nVALUES\n  ('mohamed-arslan-test-site', 'development', 'CUSTOM_SITE_BASE_URL_PLACEHOLDER', 'CUSTOM_SITE_API_BASE_URL_PLACEHOLDER', 'ar', '[\"ar\",\"en\"]'::jsonb, '{}'::jsonb, '{}'::jsonb, '[\"www.youtube.com\",\"player.vimeo.com\"]'::jsonb, TRUE)\nON CONFLICT (site_key) DO NOTHING\nRETURNING site_key;",
         "options": {}
       },
       "id": "1c99ce43-fea6-4fe1-847e-2a638ac18afa",
-      "name": "05 Insert Dev Test Site Config",
+      "name": "05 Insert Test Site Config Template",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
@@ -107,7 +107,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const expected = ['content_jobs','job_events','content_revisions','media_assets','site_configs'];\nconst found = $(\"04 Verify Tables Exist\").all().map(i => i.json.table_name).filter(Boolean);\nconst missing = expected.filter(t => !found.includes(t));\nconst errors = missing.map(t => ({ code: 'TABLE_MISSING', language: null, path: null, message: 'Expected table not found after setup: ' + t }));\nconst passed = missing.length === 0;\nreturn [{\n  json: {\n    success: passed,\n    jobId: null,\n    status: passed ? 'DB_READY' : 'DB_SETUP_FAILED',\n    message: passed\n      ? 'All automation tables exist and the development test site config is present.'\n      : 'One or more automation tables are missing after setup.',\n    data: { tablesFound: found, tablesMissing: missing, devSiteKey: 'mohamed-arslan-test-site' },\n    warnings: [],\n    errors,\n    nextAllowedActions: [],\n  },\n}];"
+        "jsCode": "const expected = ['content_jobs','job_events','content_revisions','media_assets','site_configs'];\nconst found = $(\"04 Verify Tables Exist\").all().map(i => i.json.table_name).filter(Boolean);\nconst missing = expected.filter(t => !found.includes(t));\nconst errors = missing.map(t => ({ code: 'TABLE_MISSING', language: null, path: null, message: 'Expected table not found after setup: ' + t }));\nconst passed = missing.length === 0;\nreturn [{\n  json: {\n    success: passed,\n    jobId: null,\n    status: passed ? 'DB_READY' : 'DB_SETUP_FAILED',\n    message: passed\n      ? 'All automation tables exist and the test site config template is present.'\n      : 'One or more automation tables are missing after setup.',\n    data: { tablesFound: found, tablesMissing: missing, devSiteKey: 'mohamed-arslan-test-site' },\n    warnings: [],\n    errors,\n    nextAllowedActions: [],\n  },\n}];"
       },
       "id": "aca52076-ff4a-4de3-bd2d-5f0bc4e24a2b",
       "name": "06 Return Normalized Response",
@@ -127,22 +127,6 @@
       },
       "id": "26705320-8577-4160-9c6a-789a585b3b9a",
       "name": "Sticky Note DB Overview",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        -48,
-        -48
-      ]
-    },
-    {
-      "parameters": {
-        "content": "Schema + verification\n02 enables pgcrypto (non-fatal if the provider forbids it).\n03 creates the 5 tables with CREATE TABLE IF NOT EXISTS in one transaction.\n04 verifies via information_schema. 05 seeds the development test site_config (dev URLs only). 06 returns the normalized response.",
-        "height": 300,
-        "width": 440,
-        "color": 3
-      },
-      "id": "c6965d06-a26e-4d23-9700-cb1a2d499edf",
-      "name": "Sticky Note DB Details",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -190,14 +174,14 @@
       "main": [
         [
           {
-            "node": "05 Insert Dev Test Site Config",
+            "node": "05 Insert Test Site Config Template",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "05 Insert Dev Test Site Config": {
+    "05 Insert Test Site Config Template": {
       "main": [
         [
           {

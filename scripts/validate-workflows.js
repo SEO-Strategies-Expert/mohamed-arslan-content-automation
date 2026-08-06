@@ -22,10 +22,16 @@ if (files.length === 0) {
 let hasError = false;
 let totalChecked = 0;
 
-console.log(`Starting validation of ${files.length} workflow files in workflows/...`);
+console.log(`Starting strict production validation of ${files.length} workflow files in workflows/...`);
 
 const EXPECTED_PREFIX = 'Mohamed Arslan';
 const FORBIDDEN_WORDS = ['wisal', 'Wisal', 'WISAL'];
+const FORBIDDEN_DOMAINS = [
+  'development.example.com',
+  'example.invalid',
+  'mock.wisal.local'
+];
+
 const SECRET_PATTERNS = [
   /postgres:\/\/[^:]+:[^@]+@/,
   /bot\d+:[A-Za-z0-9_-]{35}/,
@@ -33,9 +39,9 @@ const SECRET_PATTERNS = [
   /sk_live_[A-Za-z0-9]{24}/,
   /eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9/
 ];
-const PROD_DOMAINS = [
-  /https?:\/\/wisal\.[a-z]+/i,
-  /https?:\/\/([a-z0-9-]+\.)?mohamedarslan\.com/i
+
+const PLACEHOLDER_CHECKSUMS = [
+  'a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef'
 ];
 
 const REQUIRED_RESPONSE_KEYS = [
@@ -47,6 +53,16 @@ const REQUIRED_RESPONSE_KEYS = [
   'warnings',
   'errors',
   'nextAllowedActions'
+];
+
+// Anti-pattern regexes for fake fallback data after HTTP calls
+const FALLBACK_SUCCESS_PATTERNS = [
+  /resp\.previewUrls\s*\|\|/,
+  /resp\.publishedUrls\s*\|\|/,
+  /resp\.mediaId\s*\|\|/,
+  /resp\.finalUrl\s*\|\|/,
+  /http200:\s*apiResp\.httpStatus\s*===\s*200\s*\|\|\s*true/,
+  /sitemapUpdated:\s*apiResp\.sitemapUpdated\s*!==\s*undefined\s*\?\s*apiResp\.sitemapUpdated\s*:\s*true/
 ];
 
 for (const file of files) {
@@ -71,21 +87,35 @@ for (const file of files) {
     }
   }
 
-  // 2. Check for secret patterns
+  // 2. Check for forbidden domains
+  for (const domain of FORBIDDEN_DOMAINS) {
+    if (content.includes(domain)) {
+      fileErrors.push(`Contains hardcoded domain '${domain}'`);
+    }
+  }
+
+  // 3. Check for placeholder checksums
+  for (const checksum of PLACEHOLDER_CHECKSUMS) {
+    if (content.includes(checksum)) {
+      fileErrors.push(`Contains static placeholder checksum '${checksum}'`);
+    }
+  }
+
+  // 4. Check for secret patterns
   for (const pattern of SECRET_PATTERNS) {
     if (pattern.test(content)) {
       fileErrors.push(`Contains potential secret pattern matching ${pattern}`);
     }
   }
 
-  // 3. Check for production domains
-  for (const domainPattern of PROD_DOMAINS) {
-    if (domainPattern.test(content)) {
-      fileErrors.push(`Contains hardcoded production domain matching ${domainPattern}`);
+  // 5. Check for fallback success data after HTTP errors
+  for (const fallbackPattern of FALLBACK_SUCCESS_PATTERNS) {
+    if (fallbackPattern.test(content)) {
+      fileErrors.push(`Contains forbidden fallback success pattern matching ${fallbackPattern}`);
     }
   }
 
-  // 4. JSON Parse Check
+  // 6. JSON Parse Check
   let workflow = null;
   try {
     workflow = JSON.parse(content);
@@ -94,17 +124,17 @@ for (const file of files) {
   }
 
   if (workflow) {
-    // 5. Workflow Name check
+    // 7. Workflow Name check
     if (!workflow.name || !workflow.name.startsWith(EXPECTED_PREFIX)) {
       fileErrors.push(`Workflow name '${workflow.name}' does not start with '${EXPECTED_PREFIX}'`);
     }
 
-    // 6. Active state check
+    // 8. Active state check
     if (workflow.active !== false) {
       fileErrors.push(`Workflow active state is ${workflow.active}, expected false`);
     }
 
-    // 7. Node validation
+    // 9. Node validation
     if (!Array.isArray(workflow.nodes)) {
       fileErrors.push('Workflow missing nodes array');
     } else {
@@ -121,6 +151,18 @@ for (const file of files) {
         }
         nodeNames.add(node.name);
 
+        // Code node comments check: No comments containing 'mock' inside production code execution nodes
+        if (node.type === 'n8n-nodes-base.code' && node.parameters && node.parameters.jsCode) {
+          const jsCode = node.parameters.jsCode;
+          // Check for comments containing mock inside production JS code
+          const commentMatches = jsCode.match(/(\/\/.*|\/\*[\s\S]*?\*\/)/g) || [];
+          for (const comment of commentMatches) {
+            if (/\bmock\b/i.test(comment) && !node.name.includes('Dev') && !node.name.includes('Fixture')) {
+              fileErrors.push(`Node '${node.name}' contains comment with word 'mock' inside production JS code`);
+            }
+          }
+        }
+
         // Check node credentials for hardcoded IDs
         if (node.credentials) {
           for (const credType in node.credentials) {
@@ -132,7 +174,7 @@ for (const file of files) {
         }
       }
 
-      // 8. Connection target existence check
+      // 10. Connection target existence check
       if (workflow.connections && typeof workflow.connections === 'object') {
         for (const sourceNode in workflow.connections) {
           if (!nodeNames.has(sourceNode)) {
@@ -156,7 +198,7 @@ for (const file of files) {
         }
       }
 
-      // 9. Response normalization check in response code nodes
+      // 11. Response normalization check in response code nodes
       const responseNodes = workflow.nodes.filter(n =>
         n.name.includes('Response') || n.name.includes('Normalize') || n.name.includes('Return')
       );
@@ -181,7 +223,7 @@ for (const file of files) {
     hasError = true;
     console.error(`❌ [${file}] Validation failed:\n   - ${fileErrors.join('\n   - ')}`);
   } else {
-    console.log(`✅ [${file}] Passed static validation`);
+    console.log(`✅ [${file}] Passed strict static validation`);
   }
 }
 
@@ -190,6 +232,6 @@ if (hasError) {
   console.error(`FAILED: Validation failed for one or more files.`);
   process.exit(1);
 } else {
-  console.log(`SUCCESS: All ${totalChecked} workflow files passed static validation cleanly.`);
+  console.log(`SUCCESS: All ${totalChecked} workflow files passed strict static validation cleanly.`);
   process.exit(0);
 }

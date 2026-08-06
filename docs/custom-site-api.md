@@ -8,7 +8,7 @@ All n8n workflows interact with the custom website exclusively through these 11 
 
 ## Required Authentication & Headers
 
-- **Base URL (Dev Placeholder)**: `https://development.example.com/api/automation/v1`
+- **Base URL Template**: `https://<your-custom-site-domain>/api/automation/v1` (loaded dynamically from PostgreSQL `site_configs`)
 - **Authentication**: `Authorization: Bearer <CUSTOM_SITE_API_TOKEN>`
 - **Content Type**: `application/json`
 - **Publishing Idempotency**: `Idempotency-Key: <jobId>-publish-v1`
@@ -26,7 +26,7 @@ All n8n workflows interact with the custom website exclusively through these 11 
     "jobId": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001",
     "assetKey": "featured-main",
     "assetType": "featured_image",
-    "sourceUrl": "https://example.com/source.png",
+    "sourceUrl": "https://drive.google.com/...",
     "language": "ar"
   }
   ```
@@ -34,9 +34,11 @@ All n8n workflows interact with the custom website exclusively through these 11 
   ```json
   {
     "mediaId": "MEDIA-98124",
-    "finalUrl": "https://development.example.com/media/featured-main.webp",
+    "finalUrl": "https://cdn.domain.com/media/featured-main.webp",
     "width": 1200,
     "height": 630,
+    "fileSizeBytes": 45120,
+    "mimeType": "image/webp",
     "checksum": "a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef"
   }
   ```
@@ -68,8 +70,8 @@ All n8n workflows interact with the custom website exclusively through these 11 
 
 ### 3. Get Content Details
 - **Method & Path**: `GET /api/automation/v1/content/{contentId}`
-- **Used In**: `WF-16 Update Existing Page`
-- **Response**: Full JSON document representing published page content.
+- **Used In**: `WF-14 Publish Content`, `WF-16 Update Existing Page`
+- **Response**: Full JSON document representing published page content for revision snapshotting.
 
 ---
 
@@ -81,8 +83,8 @@ All n8n workflows interact with the custom website exclusively through these 11 
   ```json
   {
     "previewUrls": {
-      "ar": "https://development.example.com/preview/ar/hair-transplant-cost-turkey",
-      "en": "https://development.example.com/preview/en/hair-transplant-cost-turkey"
+      "ar": "https://preview.domain.com/ar/hair-transplant-cost-turkey",
+      "en": "https://preview.domain.com/en/hair-transplant-cost-turkey"
     }
   }
   ```
@@ -91,7 +93,7 @@ All n8n workflows interact with the custom website exclusively through these 11 
 
 ### 5. Create Draft Content Document
 - **Method & Path**: `POST /api/automation/v1/content`
-- **Used In**: `WF-14 Publish Content`
+- **Used In**: Draft page initialization
 - **Response**: `{ "contentId": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001-CNT" }`
 
 ---
@@ -112,8 +114,8 @@ All n8n workflows interact with the custom website exclusively through these 11 
   {
     "contentId": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001-CNT",
     "publishedUrls": {
-      "ar": "https://development.example.com/ar/hair-transplant-cost-turkey",
-      "en": "https://development.example.com/en/hair-transplant-cost-turkey"
+      "ar": "https://domain.com/ar/hair-transplant-cost-turkey",
+      "en": "https://domain.com/en/hair-transplant-cost-turkey"
     }
   }
   ```
@@ -129,7 +131,7 @@ All n8n workflows interact with the custom website exclusively through these 11 
 
 ### 9. Get Content Revisions
 - **Method & Path**: `GET /api/automation/v1/content/{contentId}/revisions`
-- **Used In**: Revision audit & lookup
+- **Used In**: Revision lookup & audit log
 
 ---
 

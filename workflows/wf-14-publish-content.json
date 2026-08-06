@@ -23,13 +23,13 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT job_id, site_key, status, content_id, target_languages, approval_required, approved_by FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "query": "SELECT c.job_id, c.site_key, c.status, c.content_id, c.target_languages, c.approval_required, c.approved_by, s.api_base_url FROM content_jobs c LEFT JOIN site_configs s USING (site_key) WHERE c.job_id = $1 LIMIT 1;",
         "options": {
           "queryReplacement": "={{ $json.jobId }}"
         }
       },
       "id": "02810294-8172-491a-b812-701928301935",
-      "name": "02 Load Job Details",
+      "name": "02 Load Job Details and Site Config",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
@@ -118,18 +118,43 @@
     },
     {
       "parameters": {
+        "method": "GET",
+        "url": "={{ $(\"03 Verify Approval State\").item.json.job.api_base_url }}/content/{{ $(\"03 Verify Approval State\").item.json.job.content_id || $(\"03 Verify Approval State\").item.json.job.job_id }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "06810294-8172-491a-b812-701928301937",
+      "name": "06 Fetch Existing Page Content Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1120,
+        128
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CUSTOM_SITE_API_CREDENTIAL_ID",
+          "name": "Custom Site API Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
         "operation": "executeQuery",
         "query": "INSERT INTO content_revisions (job_id, content_id, revision_id, snapshot)\nVALUES ($1, $2, $3, $4::jsonb)\nRETURNING id, revision_id;",
         "options": {
-          "queryReplacement": "={{ [$json.job_id, ($json.job_id + \"-CNT\"), (\"REV-\" + Date.now()), JSON.stringify({ jobId: $json.job_id, status: \"PRE_PUBLISH_SNAPSHOT\" })] }}"
+          "queryReplacement": "={{ [$(\"03 Verify Approval State\").item.json.job.job_id, ($(\"03 Verify Approval State\").item.json.job.content_id || $(\"03 Verify Approval State\").item.json.job.job_id), (\"REV-\" + Date.now()), JSON.stringify($json)] }}"
         }
       },
-      "id": "06820194-9128-4091-a829-102938102972",
-      "name": "06 Create Revision Snapshot",
+      "id": "07820194-9128-4091-a829-102938102972",
+      "name": "07 Create Revision Snapshot Record",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        1120,
+        1344,
         128
       ],
       "alwaysOutputData": true,
@@ -143,7 +168,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://development.example.com/api/automation/v1/content/{{ $(\"03 Verify Approval State\").item.json.job.job_id }}/publish",
+        "url": "={{ $(\"03 Verify Approval State\").item.json.job.api_base_url }}/content/{{ $(\"03 Verify Approval State\").item.json.job.job_id }}/publish",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -157,28 +182,68 @@
           "timeout": 5000
         }
       },
-      "id": "07810294-8172-491a-b812-701928301936",
-      "name": "07 Call Custom Site Publish API Adapter",
+      "id": "08810294-8172-491a-b812-701928301938",
+      "name": "08 Call Custom Site Publish API Adapter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
-        1344,
+        1568,
         128
       ],
       "alwaysOutputData": true,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CUSTOM_SITE_API_CREDENTIAL_ID",
+          "name": "Custom Site API Auth"
+        }
+      }
     },
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const jobCtx = $(\"03 Verify Approval State\").item.json.job;\nconst resp = $json || {};\nconst publishedUrls = resp.publishedUrls || {\n  ar: \"https://development.example.com/ar/hair-transplant-cost-turkey\",\n  en: \"https://development.example.com/en/hair-transplant-cost-turkey\"\n};\nconst contentId = resp.contentId || (jobCtx.job_id + \"-CNT\");\nreturn {\n  jobId: jobCtx.job_id,\n  contentId,\n  publishedUrls\n};"
+        "jsCode": "const jobCtx = $(\"03 Verify Approval State\").item.json.job;\nconst resp = $json || {};\nconst isSuccess = resp && resp.publishedUrls && typeof resp.publishedUrls === \"object\" && Object.keys(resp.publishedUrls).length > 0;\n\nif (!isSuccess) {\n  return {\n    ok: false,\n    jobId: jobCtx.job_id,\n    errorCode: \"PUBLISH_API_FAILED\",\n    errorMessage: (resp && resp.message) ? resp.message : \"Custom Site API publish request failed or returned invalid response.\"\n  };\n}\n\nreturn {\n  ok: true,\n  jobId: jobCtx.job_id,\n  contentId: resp.contentId || jobCtx.content_id || jobCtx.job_id,\n  publishedUrls: resp.publishedUrls\n};"
       },
-      "id": "08820194-9128-4019-a829-109284019296",
-      "name": "08 Extract Publication Details",
+      "id": "09820194-9128-4019-a829-109284019296",
+      "name": "09 Evaluate Publish API Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1568,
+        1792,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "10820194-9128-4091-a829-102938102973",
+      "name": "10 Publish Succeeded Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2016,
         128
       ]
     },
@@ -190,13 +255,13 @@
           "queryReplacement": "={{ [$json.jobId, $json.contentId, JSON.stringify($json.publishedUrls)] }}"
         }
       },
-      "id": "09820194-9128-4091-a829-102938102973",
-      "name": "09 Update Job Status VERIFYING",
+      "id": "11820194-9128-4091-a829-102938102974",
+      "name": "11 Update Job Status VERIFYING",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        1792,
-        128
+        2240,
+        64
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -211,16 +276,16 @@
         "operation": "executeQuery",
         "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'PUBLISHED_PENDING_VERIFICATION', 'Mohamed Arslan — WF-14 Publish Content', $2, $3::jsonb);",
         "options": {
-          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ contentId: $(\"08 Extract Publication Details\").item.json.contentId, publishedUrls: $(\"08 Extract Publication Details\").item.json.publishedUrls })] }}"
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ contentId: $(\"09 Evaluate Publish API Response\").item.json.contentId, publishedUrls: $(\"09 Evaluate Publish API Response\").item.json.publishedUrls })] }}"
         }
       },
-      "id": "10820194-9128-4091-a829-102938102974",
-      "name": "10 Log Publish Event",
+      "id": "12820194-9128-4091-a829-102938102975",
+      "name": "12 Log Publish Event",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
-        2016,
-        128
+        2464,
+        64
       ],
       "alwaysOutputData": true,
       "credentials": {
@@ -233,29 +298,53 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const p = $(\"08 Extract Publication Details\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"VERIFYING\",\n  message: \"Content published successfully to Custom Website API. Verification in progress.\",\n  data: {\n    contentId: p.contentId,\n    publishedUrls: p.publishedUrls\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"verify\", \"rollback\"]\n};"
+        "jsCode": "const p = $(\"09 Evaluate Publish API Response\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"VERIFYING\",\n  message: \"Content published successfully to Custom Website API. Verification in progress.\",\n  data: {\n    contentId: p.contentId,\n    publishedUrls: p.publishedUrls\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"verify\", \"rollback\"]\n};"
       },
-      "id": "11829104-9128-4902-8172-910293810306",
-      "name": "11 Return Normalized Response",
+      "id": "13829104-9128-4902-8172-910293810306",
+      "name": "13 Return Normalized Success Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2240,
-        128
+        2688,
+        64
       ]
     },
     {
       "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $2, updated_at = NOW() WHERE job_id = $1;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.errorMessage] }}"
+        }
+      },
+      "id": "14820194-9128-4091-a829-102938102976",
+      "name": "14 Set Status FAILED On Publish Error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2240,
+        288
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An error occurred while publishing content.\";\nconst jobId = j.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+        "jsCode": "const res = $(\"09 Evaluate Publish API Response\").item.json || $json || {};\nconst code = res.errorCode || \"PUBLISH_ERROR\";\nconst message = res.errorMessage || \"An error occurred while publishing content.\";\nconst jobId = res.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
       },
       "id": "99820194-8172-4091-b812-701928301934",
       "name": "99 Build Error Response",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        672,
-        352
+        2464,
+        288
       ]
     },
     {
@@ -294,7 +383,7 @@
     },
     {
       "parameters": {
-        "content": "WF-14 Publish Content\nEnforces human approval, takes pre-publish revision snapshot, calls Custom Website API POST /api/automation/v1/content/{id}/publish with Idempotency-Key header, and moves state to VERIFYING.",
+        "content": "WF-14 Publish Content\nEnforces human approval, loads api_base_url from site_configs, fetches real pre-publish snapshot via GET, calls Custom Website API publish endpoint with Idempotency-Key header, and updates status to VERIFYING only upon API confirmation.",
         "height": 260,
         "width": 380,
         "color": 4
@@ -315,14 +404,14 @@
       "main": [
         [
           {
-            "node": "02 Load Job Details",
+            "node": "02 Load Job Details and Site Config",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "02 Load Job Details": {
+    "02 Load Job Details and Site Config": {
       "main": [
         [
           {
@@ -366,62 +455,102 @@
       "main": [
         [
           {
-            "node": "06 Create Revision Snapshot",
+            "node": "06 Fetch Existing Page Content Snapshot",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "06 Create Revision Snapshot": {
+    "06 Fetch Existing Page Content Snapshot": {
       "main": [
         [
           {
-            "node": "07 Call Custom Site Publish API Adapter",
+            "node": "07 Create Revision Snapshot Record",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "07 Call Custom Site Publish API Adapter": {
+    "07 Create Revision Snapshot Record": {
       "main": [
         [
           {
-            "node": "08 Extract Publication Details",
+            "node": "08 Call Custom Site Publish API Adapter",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "08 Extract Publication Details": {
+    "08 Call Custom Site Publish API Adapter": {
       "main": [
         [
           {
-            "node": "09 Update Job Status VERIFYING",
+            "node": "09 Evaluate Publish API Response",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "09 Update Job Status VERIFYING": {
+    "09 Evaluate Publish API Response": {
       "main": [
         [
           {
-            "node": "10 Log Publish Event",
+            "node": "10 Publish Succeeded Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "10 Log Publish Event": {
+    "10 Publish Succeeded Check": {
       "main": [
         [
           {
-            "node": "11 Return Normalized Response",
+            "node": "11 Update Job Status VERIFYING",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "14 Set Status FAILED On Publish Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 Update Job Status VERIFYING": {
+      "main": [
+        [
+          {
+            "node": "12 Log Publish Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12 Log Publish Event": {
+      "main": [
+        [
+          {
+            "node": "13 Return Normalized Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "14 Set Status FAILED On Publish Error": {
+      "main": [
+        [
+          {
+            "node": "99 Build Error Response",
             "type": "main",
             "index": 0
           }
@@ -443,7 +572,7 @@
       "main": [
         [
           {
-            "node": "02 Load Job Details",
+            "node": "02 Load Job Details and Site Config",
             "type": "main",
             "index": 0
           }

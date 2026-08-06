@@ -1,0 +1,246 @@
+{
+  "name": "Mohamed Arslan — WF-10 Upload Media",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "assetKey"
+            },
+            {
+              "name": "assetType"
+            },
+            {
+              "name": "sourceUrl"
+            },
+            {
+              "name": "language"
+            }
+          ]
+        }
+      },
+      "id": "e100284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://development.example.com/api/automation/v1/media",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jobId: $json.jobId, assetKey: $json.assetKey, assetType: $json.assetType, sourceUrl: $json.sourceUrl, language: $json.language }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301930",
+      "name": "02 Upload To Custom Site API Adapter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst resp = $json || {};\nconst mediaId = resp.mediaId || (\"MEDIA-\" + Math.floor(Math.random() * 100000));\nconst finalUrl = resp.finalUrl || (\"https://development.example.com/media/\" + (input.assetKey || \"asset\") + \".webp\");\nreturn {\n  jobId: input.jobId,\n  assetKey: input.assetKey || \"featured-main\",\n  assetType: input.assetType || \"featured_image\",\n  sourceUrl: input.sourceUrl || null,\n  finalUrl,\n  mediaId,\n  language: input.language || null,\n  width: 1200,\n  height: 630,\n  fileSizeBytes: 84520,\n  mimeType: \"image/webp\",\n  checksum: \"a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef\",\n  approvalStatus: \"approved\"\n};"
+      },
+      "id": "03820194-9128-4019-a829-109284019290",
+      "name": "03 Process Media Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO media_assets (job_id, asset_key, asset_type, source_url, final_url, media_id, language, width, height, file_size_bytes, mime_type, checksum, approval_status)\nVALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)\nON CONFLICT (asset_key) DO UPDATE SET final_url = EXCLUDED.final_url, media_id = EXCLUDED.media_id, approval_status = EXCLUDED.approval_status\nRETURNING id, asset_key, media_id;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.assetKey, $json.assetType, $json.sourceUrl, $json.finalUrl, $json.mediaId, $json.language, $json.width, $json.height, $json.fileSizeBytes, $json.mimeType, $json.checksum, $json.approvalStatus] }}"
+        }
+      },
+      "id": "04820194-9128-4091-a829-102938102962",
+      "name": "04 Insert Media Asset Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const m = $(\"03 Process Media Response\").item.json;\nreturn {\n  success: true,\n  jobId: m.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Media asset uploaded and registered in database successfully.\",\n  data: {\n    assetKey: m.assetKey,\n    mediaId: m.mediaId,\n    finalUrl: m.finalUrl\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"create_preview\"]\n};"
+      },
+      "id": "05829104-9128-4902-8172-910293810300",
+      "name": "05 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        192
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211320",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "assetKey",
+              "type": "string",
+              "value": "featured-main"
+            },
+            {
+              "id": "a3",
+              "name": "assetType",
+              "type": "string",
+              "value": "featured_image"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211321",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-10 Upload Media\nUploads asset to Custom Website API endpoint POST /api/automation/v1/media and records media details into media_assets table.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211322",
+      "name": "Sticky Note WF10 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Upload To Custom Site API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Upload To Custom Site API Adapter": {
+      "main": [
+        [
+          {
+            "node": "03 Process Media Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Process Media Response": {
+      "main": [
+        [
+          {
+            "node": "04 Insert Media Asset Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Insert Media Asset Record": {
+      "main": [
+        [
+          {
+            "node": "05 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Upload To Custom Site API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

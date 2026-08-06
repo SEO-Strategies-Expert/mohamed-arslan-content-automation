@@ -1,0 +1,302 @@
+{
+  "name": "Mohamed Arslan — WF-08 Before-After Selector",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "category"
+            },
+            {
+              "name": "maxUseCount"
+            }
+          ]
+        }
+      },
+      "id": "e801284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT id, asset_key, source_url, final_url, approval_status, consent_status, used_count\nFROM media_assets\nWHERE asset_type = 'before_after'\n  AND approval_status = 'approved'\n  AND consent_status = 'approved'\n  AND used_count < COALESCE($1::integer, 10)\nORDER BY used_count ASC, created_at DESC\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.maxUseCount || 10 }}"
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301928",
+      "name": "02 Query Approved Before-After Asset",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const row = ($json && $json.id) ? $json : null;\nif (!row) {\n  return {\n    ok: false,\n    errorCode: \"NO_APPROVED_ASSET_FOUND\",\n    errorMessage: \"No approved before/after image with valid consent was found under max use limit.\"\n  };\n}\nreturn { ok: true, asset: row };"
+      },
+      "id": "03820194-9128-4019-a829-109284019288",
+      "name": "03 Check Asset Match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "04829104-9128-4902-8172-910293810299",
+      "name": "04 Asset Found Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE media_assets\nSET used_count = used_count + 1,\n    used_in_content_id = $2\nWHERE id = $1\nRETURNING id, asset_key, used_count;",
+        "options": {
+          "queryReplacement": "={{ [$json.asset.id, $(\"01 Input Trigger\").item.json.jobId] }}"
+        }
+      },
+      "id": "05820194-9128-4091-a829-102938102960",
+      "name": "05 Increment Used Count",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const match = $(\"03 Check Asset Match\").item.json.asset;\nconst input = $(\"01 Input Trigger\").item.json;\nreturn {\n  success: true,\n  jobId: input.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Approved before/after image selected and usage count updated.\",\n  data: {\n    assetId: match.id,\n    assetKey: match.asset_key,\n    sourceUrl: match.source_url,\n    finalUrl: match.final_url,\n    usedCount: match.used_count + 1\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"optimize_images\"]\n};"
+      },
+      "id": "06820194-9128-4091-a829-102938102961",
+      "name": "06 Return Normalized Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"NO_APPROVED_ASSET_FOUND\";\nconst message = j.errorMessage || \"No suitable approved before/after image with valid consent found.\";\nconst input = $(\"01 Input Trigger\").item.json;\nreturn {\n  success: false,\n  jobId: input.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301931",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        352
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211314",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "category",
+              "type": "string",
+              "value": "hair-transplant"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211315",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-08 Before-After Selector\nSelects compliant before/after assets (approval_status=approved, consent_status=approved, used_count < maxUseCount) and increments usage.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211316",
+      "name": "Sticky Note WF08 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Query Approved Before-After Asset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Query Approved Before-After Asset": {
+      "main": [
+        [
+          {
+            "node": "03 Check Asset Match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Check Asset Match": {
+      "main": [
+        [
+          {
+            "node": "04 Asset Found Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Asset Found Check": {
+      "main": [
+        [
+          {
+            "node": "05 Increment Used Count",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Increment Used Count": {
+      "main": [
+        [
+          {
+            "node": "06 Return Normalized Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Query Approved Before-After Asset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

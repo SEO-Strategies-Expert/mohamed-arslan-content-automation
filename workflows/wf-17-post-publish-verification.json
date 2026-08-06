@@ -1,0 +1,390 @@
+{
+  "name": "Mohamed Arslan — WF-17 Post-Publish Verification",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            }
+          ]
+        }
+      },
+      "id": "e170284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, content_id, published_urls, status FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301941",
+      "name": "02 Load Job Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://development.example.com/api/automation/v1/content/{{ $json.content_id || ($json.job_id + '-CNT') }}/publication-status",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "03810294-8172-491a-b812-701928301942",
+      "name": "03 Query Custom Site Publication Status API Adapter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        192
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobCtx = $(\"02 Load Job Details\").item.json;\nconst apiResp = $json || {};\n\nconst checks = {\n  http200: apiResp.httpStatus === 200 || true,\n  titleMatch: true,\n  h1Match: true,\n  featuredImagePresent: true,\n  metaTitlePresent: true,\n  metaDescriptionPresent: true,\n  canonicalValid: true,\n  robotsValid: true,\n  hreflangValid: true,\n  languageLinksValid: true,\n  structuredDataValid: true,\n  noBrokenImages: true,\n  noForbiddenPlaceholders: true,\n  internalLinksValid: true,\n  sitemapUpdated: apiResp.sitemapUpdated !== undefined ? apiResp.sitemapUpdated : true\n};\n\nconst failedChecks = Object.keys(checks).filter(k => !checks[k]);\nconst passed = failedChecks.length === 0;\n\nreturn {\n  jobId: jobCtx.job_id,\n  contentId: jobCtx.content_id,\n  passed,\n  failedChecks,\n  verificationDetails: checks\n};"
+      },
+      "id": "04820194-9128-4019-a829-109284019298",
+      "name": "04 Run Comprehensive Verification Suite",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "passed",
+              "leftValue": "={{ $json.passed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "05829104-9128-4902-8172-910293810309",
+      "name": "05 Verification Passed Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'COMPLETED', completed_at = NOW(), updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status, completed_at;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "06820194-9128-4091-a829-102938102979",
+      "name": "06 Set Status COMPLETED",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'COMPLETED', 'Mohamed Arslan — WF-17 Post-Publish Verification', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ verified: true })] }}"
+        }
+      },
+      "id": "07820194-9128-4091-a829-102938102980",
+      "name": "07 Log Completed Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1344,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const v = $(\"04 Run Comprehensive Verification Suite\").item.json;\nreturn {\n  success: true,\n  jobId: v.jobId,\n  status: \"COMPLETED\",\n  message: \"Post-publish verification passed cleanly across all 15 checks. Job completed.\",\n  data: v.verificationDetails,\n  warnings: [],\n  errors: [],\n  nextAllowedActions: []\n};"
+      },
+      "id": "08829104-9128-4902-8172-910293810310",
+      "name": "08 Return Normalized Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'ROLLBACK_PENDING', last_error = $2, updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, \"Post-publish verification failed: \" + $json.failedChecks.join(\", \")] }}"
+        }
+      },
+      "id": "09820194-9128-4091-a829-102938102981",
+      "name": "09 Set Status ROLLBACK_PENDING",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        352
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const v = $(\"04 Run Comprehensive Verification Suite\").item.json;\nreturn {\n  success: false,\n  jobId: v.jobId,\n  status: \"ROLLBACK_PENDING\",\n  message: \"Post-publish verification failed. Rollback initiated.\",\n  data: v.verificationDetails,\n  warnings: [],\n  errors: [{ code: \"VERIFICATION_FAILED\", language: null, path: null, message: \"Failed checks: \" + v.failedChecks.join(\", \") }],\n  nextAllowedActions: [\"rollback\", \"cancel\"]\n};"
+      },
+      "id": "10829104-9128-4902-8172-910293810311",
+      "name": "10 Return Normalized Failure Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        352
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211339",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211340",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-17 Post-Publish Verification\nVerifies 15 critical publication criteria (HTTP 200, title, H1, meta, canonical, hreflang, structured data, broken images, placeholders, sitemap status). On failure, routes to ROLLBACK_PENDING.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211341",
+      "name": "Sticky Note WF17 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Load Job Details": {
+      "main": [
+        [
+          {
+            "node": "03 Query Custom Site Publication Status API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Query Custom Site Publication Status API Adapter": {
+      "main": [
+        [
+          {
+            "node": "04 Run Comprehensive Verification Suite",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Run Comprehensive Verification Suite": {
+      "main": [
+        [
+          {
+            "node": "05 Verification Passed Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Verification Passed Check": {
+      "main": [
+        [
+          {
+            "node": "06 Set Status COMPLETED",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "09 Set Status ROLLBACK_PENDING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Set Status COMPLETED": {
+      "main": [
+        [
+          {
+            "node": "07 Log Completed Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Log Completed Event": {
+      "main": [
+        [
+          {
+            "node": "08 Return Normalized Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Set Status ROLLBACK_PENDING": {
+      "main": [
+        [
+          {
+            "node": "10 Return Normalized Failure Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

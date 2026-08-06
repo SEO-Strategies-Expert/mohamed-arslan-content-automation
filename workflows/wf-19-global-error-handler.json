@@ -1,0 +1,278 @@
+{
+  "name": "Mohamed Arslan — WF-19 Global Error Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "errorType"
+            },
+            {
+              "name": "message"
+            },
+            {
+              "name": "details"
+            }
+          ]
+        }
+      },
+      "id": "e190284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Error Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst rawType = (j.errorType || \"UNKNOWN_ERROR\").trim().toUpperCase();\nconst validTypes = [\n  \"VALIDATION_ERROR\", \"AUTHENTICATION_ERROR\", \"RATE_LIMIT\", \"NETWORK_ERROR\",\n  \"DRIVE_ERROR\", \"ASSET_RENDER_ERROR\", \"MEDIA_UPLOAD_ERROR\", \"SITE_API_ERROR\",\n  \"PUBLISH_ERROR\", \"VERIFICATION_ERROR\", \"DATABASE_ERROR\", \"UNKNOWN_ERROR\"\n];\n\nconst classifiedType = validTypes.includes(rawType) ? rawType : \"UNKNOWN_ERROR\";\nconst nonRetryable = [\"VALIDATION_ERROR\", \"AUTHENTICATION_ERROR\"];\nconst isRetryable = !nonRetryable.includes(classifiedType);\n\nreturn {\n  jobId: j.jobId || null,\n  classifiedType,\n  message: j.message || \"An unhandled system error occurred.\",\n  details: j.details || null,\n  isRetryable\n};"
+      },
+      "id": "02810294-8172-491a-b812-701928301945",
+      "name": "02 Classify System Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs\nSET status = 'FAILED',\n    last_error = $2,\n    retry_count = retry_count + 1,\n    updated_at = NOW()\nWHERE job_id = $1\nRETURNING job_id, status, retry_count;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, ($json.classifiedType + \": \" + $json.message)] }}"
+        }
+      },
+      "id": "03820194-9128-4091-a829-102938102985",
+      "name": "03 Record Error In Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'GLOBAL_ERROR_CAPTURED', 'Mohamed Arslan — WF-19 Global Error Handler', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$(\"02 Classify System Error\").item.json.jobId, $execution.id, JSON.stringify({ classifiedType: $(\"02 Classify System Error\").item.json.classifiedType, message: $(\"02 Classify System Error\").item.json.message })] }}"
+        }
+      },
+      "id": "04820194-9128-4091-a829-102938102986",
+      "name": "04 Log Error Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/botTELEGRAM_BOT_TOKEN_PLACEHOLDER/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: \"TELEGRAM_CHAT_ID_PLACEHOLDER\", text: `⚠️ <b>[Mohamed Arslan] System Error Captured</b>\\n\\n<b>Job ID:</b> ${$json.job_id || 'N/A'}\\n<b>Type:</b> ${$(\"02 Classify System Error\").item.json.classifiedType}\\n<b>Message:</b> ${$(\"02 Classify System Error\").item.json.message}`, parse_mode: \"HTML\" }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "05810294-8172-491a-b812-701928301946",
+      "name": "05 Dispatch Telegram Error Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        896,
+        192
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const err = $(\"02 Classify System Error\").item.json;\nconst nextAllowedActions = err.isRetryable ? [\"retry\", \"cancel\"] : [\"cancel\"];\nreturn {\n  success: false,\n  jobId: err.jobId,\n  status: \"FAILED\",\n  message: err.message,\n  data: err.details,\n  warnings: [],\n  errors: [{ code: err.classifiedType, language: null, path: null, message: err.message }],\n  nextAllowedActions\n};"
+      },
+      "id": "06829104-9128-4902-8172-910293810313",
+      "name": "06 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211345",
+      "name": "01M Manual Error Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "errorType",
+              "type": "string",
+              "value": "SITE_API_ERROR"
+            },
+            {
+              "id": "a3",
+              "name": "message",
+              "type": "string",
+              "value": "HTTP 500 received from Custom Site API during publish"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211346",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-19 Global Error Handler\nClassifies errors into 12 standardized error categories, updates database, logs events, dispatches Telegram alerts, and determines retryability.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211347",
+      "name": "Sticky Note WF19 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Error Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Classify System Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Classify System Error": {
+      "main": [
+        [
+          {
+            "node": "03 Record Error In Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Record Error In Database": {
+      "main": [
+        [
+          {
+            "node": "04 Log Error Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Log Error Event": {
+      "main": [
+        [
+          {
+            "node": "05 Dispatch Telegram Error Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Dispatch Telegram Error Alert": {
+      "main": [
+        [
+          {
+            "node": "06 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Classify System Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

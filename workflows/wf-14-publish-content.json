@@ -1,0 +1,459 @@
+{
+  "name": "Mohamed Arslan — WF-14 Publish Content",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            }
+          ]
+        }
+      },
+      "id": "e140284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, site_key, status, content_id, target_languages, approval_required, approved_by FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301935",
+      "name": "02 Load Job Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobId = $(\"01 Input Trigger\").item.json.jobId || ($json && $json.job_id);\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + jobId + \".\";\n} else {\n  if (row.approval_required && row.status !== \"APPROVED\") {\n    errorCode = \"APPROVAL_REQUIRED\";\n    errorMessage = \"Publishing requires human approval. Current status: \" + row.status + \".\";\n  }\n}\nreturn { jobId, job: row, ok: errorCode === null, errorCode, errorMessage };"
+      },
+      "id": "03820194-9128-4019-a829-109284019295",
+      "name": "03 Verify Approval State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "04829104-9128-4902-8172-910293810305",
+      "name": "04 State OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'PUBLISHING', updated_at = NOW() WHERE job_id = $1 AND status = 'APPROVED' RETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "05820194-9128-4091-a829-102938102971",
+      "name": "05 Acquire Lock and Set PUBLISHING",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_revisions (job_id, content_id, revision_id, snapshot)\nVALUES ($1, $2, $3, $4::jsonb)\nRETURNING id, revision_id;",
+        "options": {
+          "queryReplacement": "={{ [$json.job_id, ($json.job_id + \"-CNT\"), (\"REV-\" + Date.now()), JSON.stringify({ jobId: $json.job_id, status: \"PRE_PUBLISH_SNAPSHOT\" })] }}"
+        }
+      },
+      "id": "06820194-9128-4091-a829-102938102972",
+      "name": "06 Create Revision Snapshot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://development.example.com/api/automation/v1/content/{{ $(\"03 Verify Approval State\").item.json.job.job_id }}/publish",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Idempotency-Key",
+              "value": "={{ $(\"03 Verify Approval State\").item.json.job.job_id }}-publish-v1"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "07810294-8172-491a-b812-701928301936",
+      "name": "07 Call Custom Site Publish API Adapter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1344,
+        128
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobCtx = $(\"03 Verify Approval State\").item.json.job;\nconst resp = $json || {};\nconst publishedUrls = resp.publishedUrls || {\n  ar: \"https://development.example.com/ar/hair-transplant-cost-turkey\",\n  en: \"https://development.example.com/en/hair-transplant-cost-turkey\"\n};\nconst contentId = resp.contentId || (jobCtx.job_id + \"-CNT\");\nreturn {\n  jobId: jobCtx.job_id,\n  contentId,\n  publishedUrls\n};"
+      },
+      "id": "08820194-9128-4019-a829-109284019296",
+      "name": "08 Extract Publication Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'VERIFYING', content_id = $2, published_urls = $3::jsonb, updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.contentId, JSON.stringify($json.publishedUrls)] }}"
+        }
+      },
+      "id": "09820194-9128-4091-a829-102938102973",
+      "name": "09 Update Job Status VERIFYING",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1792,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'PUBLISHED_PENDING_VERIFICATION', 'Mohamed Arslan — WF-14 Publish Content', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ contentId: $(\"08 Extract Publication Details\").item.json.contentId, publishedUrls: $(\"08 Extract Publication Details\").item.json.publishedUrls })] }}"
+        }
+      },
+      "id": "10820194-9128-4091-a829-102938102974",
+      "name": "10 Log Publish Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2016,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const p = $(\"08 Extract Publication Details\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"VERIFYING\",\n  message: \"Content published successfully to Custom Website API. Verification in progress.\",\n  data: {\n    contentId: p.contentId,\n    publishedUrls: p.publishedUrls\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"verify\", \"rollback\"]\n};"
+      },
+      "id": "11829104-9128-4902-8172-910293810306",
+      "name": "11 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An error occurred while publishing content.\";\nconst jobId = j.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301934",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        352
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211330",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211331",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-14 Publish Content\nEnforces human approval, takes pre-publish revision snapshot, calls Custom Website API POST /api/automation/v1/content/{id}/publish with Idempotency-Key header, and moves state to VERIFYING.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211332",
+      "name": "Sticky Note WF14 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Load Job Details": {
+      "main": [
+        [
+          {
+            "node": "03 Verify Approval State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Verify Approval State": {
+      "main": [
+        [
+          {
+            "node": "04 State OK Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 State OK Check": {
+      "main": [
+        [
+          {
+            "node": "05 Acquire Lock and Set PUBLISHING",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Acquire Lock and Set PUBLISHING": {
+      "main": [
+        [
+          {
+            "node": "06 Create Revision Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Create Revision Snapshot": {
+      "main": [
+        [
+          {
+            "node": "07 Call Custom Site Publish API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Call Custom Site Publish API Adapter": {
+      "main": [
+        [
+          {
+            "node": "08 Extract Publication Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Extract Publication Details": {
+      "main": [
+        [
+          {
+            "node": "09 Update Job Status VERIFYING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Update Job Status VERIFYING": {
+      "main": [
+        [
+          {
+            "node": "10 Log Publish Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Log Publish Event": {
+      "main": [
+        [
+          {
+            "node": "11 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

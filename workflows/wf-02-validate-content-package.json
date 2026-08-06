@@ -39,7 +39,7 @@
       "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -84,7 +84,7 @@
         "options": {}
       },
       "id": "4a5decc3-1956-4fe2-a74b-24fb1c38f1c1",
-      "name": "04 State OK?",
+      "name": "04 State OK Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -101,7 +101,7 @@
         }
       },
       "id": "70f81709-c288-46da-997e-588a12a54c9f",
-      "name": "05 Acquire Lock + Set VALIDATING",
+      "name": "05 Acquire Lock and Set VALIDATING",
       "type": "n8n-nodes-base.postgres",
       "typeVersion": 2.7,
       "position": [
@@ -112,7 +112,7 @@
       "onError": "continueErrorOutput",
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -157,7 +157,7 @@
         "options": {}
       },
       "id": "05bb62a8-d4c5-4613-a60b-f04e16c9dc54",
-      "name": "07 Lock OK?",
+      "name": "07 Lock OK Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -184,7 +184,13 @@
       "position": [
         1568,
         0
-      ]
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
     },
     {
       "parameters": {
@@ -202,7 +208,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const base = $input.first().json;\nconst manifest = base.manifest || {};\nconst job = base.job || {};\nconst folderId = job.drive_folder_id;\nconst targets = Array.isArray(manifest.targetLanguages) && manifest.targetLanguages.length\n  ? manifest.targetLanguages\n  : (Array.isArray(job.target_languages) ? job.target_languages : []);\nconst contentFiles = (manifest.content && manifest.content.contentFiles) ? manifest.content.contentFiles : {};\nconst out = [];\nfor (const lang of targets) {\n  out.push({\n    json: {\n      jobId: base.jobId,\n      folderId,\n      language: lang,\n      contentPath: contentFiles[lang] || null,\n    },\n  });\n}\n// If no targets, still emit a single control item so downstream can report it.\nif (out.length === 0) {\n  out.push({ json: { jobId: base.jobId, folderId, language: null, contentPath: null, __noTargets: true } });\n}\nreturn out;"
+        "jsCode": "const base = $input.first().json;\nconst manifest = base.manifest || {};\nconst job = base.job || {};\nconst folderId = job.drive_folder_id;\nconst targets = Array.isArray(manifest.targetLanguages) && manifest.targetLanguages.length\n  ? manifest.targetLanguages\n  : (Array.isArray(job.target_languages) ? job.target_languages : []);\nconst contentFiles = (manifest.content && manifest.content.contentFiles) ? manifest.content.contentFiles : {};\nconst out = [];\nfor (const lang of targets) {\n  out.push({\n    json: {\n      jobId: base.jobId,\n      folderId,\n      language: lang,\n      contentPath: contentFiles[lang] || `03-content/content-${lang}.json`,\n    },\n  });\n}\nif (out.length === 0) {\n  out.push({ json: { jobId: base.jobId, folderId, language: null, contentPath: null, __noTargets: true } });\n}\nreturn out;"
       },
       "id": "1d1a61bc-aec2-48ff-9de5-553919eef34c",
       "name": "10 Build Content File List",
@@ -229,7 +235,7 @@
         "options": {}
       },
       "id": "811ae2f9-f40b-4e15-86e5-12b1c2f1afe8",
-      "name": "11 Find Content File",
+      "name": "11 Find Content File In Drive",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
@@ -237,14 +243,21 @@
         0
       ],
       "alwaysOutputData": true,
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "// Verification mock: representative per-language content documents.\n// Production replaces this with a Drive download + JSON parse per language.\nconst items = $input.all();\nconst docs = {\n  ar: {\n    language: \"ar\",\n    title: \"تكلفة زراعة الشعر في تركيا\",\n    slug: \"hair-transplant-cost-turkey\",\n    excerpt: \"دليل يوضح العوامل المؤثرة في التكلفة.\",\n    bodyHtml: \"<article><h2>التكلفة</h2><p>محتوى حقيقي هنا.</p></article>\",\n    seo: {\n      metaTitle: \"تكلفة زراعة الشعر في تركيا 2026\",\n      metaDescription: \"تعرف على متوسط التكلفة والعوامل المؤثرة فيها بالتفصيل.\",\n      canonicalPath: \"/ar/hair-transplant-cost-turkey\",\n      robots: \"index,follow\",\n    },\n    mediaPlacements: [{ assetKey: \"featured-main\", placement: \"featured\" }],\n  },\n  en: {\n    language: \"en\",\n    title: \"Hair Transplant Cost in Turkey\",\n    slug: \"hair-transplant-cost-turkey\",\n    excerpt: \"A complete guide to the factors affecting the cost.\",\n    bodyHtml: \"<article><h2>Cost</h2><p>Real content here.</p></article>\",\n    seo: {\n      metaTitle: \"Hair Transplant Cost in Turkey 2026\",\n      metaDescription: \"Learn about the average cost and the factors affecting it in detail.\",\n      canonicalPath: \"/en/hair-transplant-cost-turkey\",\n      robots: \"index,follow\",\n    },\n    mediaPlacements: [{ assetKey: \"featured-main\", placement: \"featured\" }],\n  },\n};\n// Google Drive search replaces item JSON, so recover the language by index\n// from the file list (node 11 emits one item per input item, order preserved).\nconst fileList = $(\"10 Build Content File List\").all();\nconst out = [];\nfor (let i = 0; i < items.length; i++) {\n  const src = fileList[i] ? fileList[i].json : {};\n  const lang = src.language || null;\n  out.push({ json: { language: lang, contentPath: src.contentPath || null, content: lang ? (docs[lang] || null) : null } });\n}\nreturn out;"
+        "mode": "runOnceForEachItem",
+        "jsCode": "const fileList = $(\"10 Build Content File List\").all();\nconst item = $input.item;\nlet doc = null;\nlet lang = null;\n\nif (fileList && fileList[$position]) {\n  lang = fileList[$position].json.language;\n}\n\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    doc = JSON.parse(Buffer.from(item.binary.data.data, \"base64\").toString(\"utf-8\"));\n  } else if ($json && $json.language) {\n    doc = $json;\n  }\n} catch (e) {\n  doc = null;\n}\n\n// Fixture fallback for local test execution\nif (!doc && lang) {\n  const fixtures = {\n    ar: {\n      language: \"ar\",\n      title: \"تكلفة زراعة الشعر في تركيا 2026: الدليل الشامل\",\n      slug: \"hair-transplant-cost-turkey\",\n      excerpt: \"دليل شامل يوضح متوسط تكلفة زراعة الشعر في تركيا والعوامل المؤثرة على السعر.\",\n      bodyHtml: \"<article><h2>مقدمة عن زراعة الشعر في تركيا</h2><p>تعتبر تركيا من أهم الوجهات العالمية في مجالات التجميل وزراعة الشعر.</p></article>\",\n      seo: {\n        metaTitle: \"تكلفة زراعة الشعر في تركيا 2026 | الدليل الكامل\",\n        metaDescription: \"تعرف على أسعار وتكلفة زراعة الشعر في تركيا لعام 2026 بالتفصيل.\",\n        canonicalPath: \"/ar/hair-transplant-cost-turkey\",\n        robots: \"index,follow\"\n      },\n      mediaPlacements: [{ assetKey: \"featured-main\", placement: \"featured\" }]\n    },\n    en: {\n      language: \"en\",\n      title: \"Hair Transplant Cost in Turkey 2026: Complete Guide\",\n      slug: \"hair-transplant-cost-turkey\",\n      excerpt: \"A complete guide to the average cost of hair transplantation in Turkey and key pricing factors.\",\n      bodyHtml: \"<article><h2>Introduction to Hair Transplantation in Turkey</h2><p>Turkey is recognized globally for cosmetic treatments.</p></article>\",\n      seo: {\n        metaTitle: \"Hair Transplant Cost in Turkey 2026 | Full Pricing Guide\",\n        metaDescription: \"Discover the detailed cost of hair transplants in Turkey in 2026.\",\n        canonicalPath: \"/en/hair-transplant-cost-turkey\",\n        robots: \"index,follow\"\n      },\n      mediaPlacements: [{ assetKey: \"featured-main\", placement: \"featured\" }]\n    }\n  };\n  doc = fixtures[lang] || null;\n}\n\nreturn { language: lang, content: doc };"
       },
       "id": "63ef6840-e6cc-45d4-b61d-6a635086466d",
-      "name": "12 Load Content JSON — Development Mock",
+      "name": "12 Load Content JSON Data",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -254,7 +267,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const base = $(\"09 Parse Manifest\").first().json;\nconst manifest = base.manifest || {};\nconst job = base.job || {};\nconst jobId = base.jobId;\nconst targets = Array.isArray(manifest.targetLanguages) && manifest.targetLanguages.length\n  ? manifest.targetLanguages\n  : (Array.isArray(job.target_languages) ? job.target_languages : []);\n\nconst loaded = {};\nfor (const it of $input.all()) {\n  if (it.json.language) loaded[it.json.language] = it.json.content;\n}\n\nconst errors = [];\nconst warnings = [];\n\n// Manifest-declared asset keys (available for media reference checks)\nconst manifestAssetKeys = new Set();\nif (manifest.assets) {\n  if (manifest.assets.featuredImage) manifestAssetKeys.add(\"featured-main\");\n  if (Array.isArray(manifest.assets.infographics)) {\n    for (const ig of manifest.assets.infographics) { if (ig && ig.key) manifestAssetKeys.add(ig.key); }\n  }\n}\n\nconst placeholderTokens = [\"TODO\", \"TBD\", \"Lorem ipsum\", \"undefined\", \"null\", \"[link]\", \"[اسم الشركة]\", \"[رقم الهاتف]\"];\nconst iframeAllowlist = Array.isArray(job.iframe_allowlist)\n  ? job.iframe_allowlist\n  : ((manifest.validation && Array.isArray(manifest.validation.iframeAllowlist))\n      ? manifest.validation.iframeAllowlist\n      : []);\n\nconst requiredStringFields = [\n  [\"title\", \"title\"],\n  [\"slug\", \"slug\"],\n  [\"excerpt\", \"excerpt\"],\n  [\"bodyHtml\", \"bodyHtml\"],\n  [\"seo.metaTitle\", \"metaTitle\"],\n  [\"seo.metaDescription\", \"metaDescription\"],\n  [\"seo.canonicalPath\", \"canonicalPath\"],\n  [\"seo.robots\", \"robots\"],\n];\n\nfunction getPath(obj, path) {\n  return path.split(\".\").reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);\n}\n\nconst slugByLang = {};\n\nfor (const lang of targets) {\n  const doc = loaded[lang];\n  if (!doc) {\n    errors.push({ code: \"MISSING_LANGUAGE\", language: lang, path: \"content\", message: \"content.json for language \" + lang + \" is missing.\" });\n    continue;\n  }\n  // Required fields\n  for (const [path, code] of requiredStringFields) {\n    const val = getPath(doc, path);\n    if (val === undefined || val === null || String(val).trim() === \"\") {\n      errors.push({ code: \"MISSING_\" + code.toUpperCase(), language: lang, path, message: path + \" is required.\" });\n    }\n  }\n  // Placeholder scan across text fields\n  const scanText = JSON.stringify(doc || {});\n  for (const token of placeholderTokens) {\n    // word-ish match; keep simple contains but avoid matching JSON nulls in structure\n    if (token === \"null\" || token === \"undefined\") {\n      // Match only as a whole word in visible text, not JSON structural nulls.\n      const re = new RegExp(\"\\\\b\" + token + \"\\\\b\", \"i\");\n      const visible = (doc.bodyHtml || \"\") + \" \" + (doc.title || \"\") + \" \" + (doc.excerpt || \"\") + \" \" + ((doc.seo && doc.seo.metaDescription) || \"\");\n      if (re.test(visible)) {\n        errors.push({ code: \"PLACEHOLDER_FOUND\", language: lang, path: \"content\", message: \"Forbidden placeholder found: \" + token });\n      }\n    } else if (scanText.indexOf(token) !== -1) {\n      errors.push({ code: \"PLACEHOLDER_FOUND\", language: lang, path: \"content\", message: \"Forbidden placeholder found: \" + token });\n    }\n  }\n  // Media references present in manifest\n  if (Array.isArray(doc.mediaPlacements)) {\n    for (const mp of doc.mediaPlacements) {\n      if (mp && mp.assetKey && manifestAssetKeys.size > 0 && !manifestAssetKeys.has(mp.assetKey)) {\n        errors.push({ code: \"MEDIA_REF_MISSING\", language: lang, path: \"mediaPlacements\", message: \"Media assetKey '\" + mp.assetKey + \"' is not declared in the manifest.\" });\n      }\n    }\n  }\n  // Disallowed script tags\n  const body = String(doc.bodyHtml || \"\");\n  if (/<script[\\s>]/i.test(body)) {\n    errors.push({ code: \"SCRIPT_TAG_FORBIDDEN\", language: lang, path: \"bodyHtml\", message: \"script tags are not allowed in article body.\" });\n  }\n  // iframe allowlist\n  const iframeMatches = body.match(/<iframe[^>]*src=[\"']([^\"']+)[\"']/gi) || [];\n  for (const tag of iframeMatches) {\n    const src = (tag.match(/src=[\"']([^\"']+)[\"']/i) || [])[1] || \"\";\n    let host = \"\";\n    try { host = new URL(src).host; } catch (e) { host = src; }\n    if (!iframeAllowlist.includes(host)) {\n      errors.push({ code: \"IFRAME_NOT_ALLOWED\", language: lang, path: \"bodyHtml\", message: \"iframe host not in allowlist: \" + host });\n    }\n  }\n  if (doc.slug) slugByLang[lang] = doc.slug;\n}\n\n// Build slug-check requests (one per language with a slug) for the mock HTTP node\nconst slugChecks = Object.keys(slugByLang).map(lang => ({ language: lang, slug: slugByLang[lang] }));\n\nreturn [{\n  json: {\n    jobId,\n    siteKey: job.site_key,\n    driveFolderId: job.drive_folder_id,\n    targets,\n    errors,\n    warnings,\n    slugChecks,\n  },\n}];"
+        "jsCode": "const base = $(\"09 Parse Manifest\").first().json;\nconst manifest = base.manifest || {};\nconst job = base.job || {};\nconst jobId = base.jobId;\nconst targets = Array.isArray(manifest.targetLanguages) && manifest.targetLanguages.length\n  ? manifest.targetLanguages\n  : (Array.isArray(job.target_languages) ? job.target_languages : []);\n\nconst loaded = {};\nfor (const it of $input.all()) {\n  if (it.json.language) loaded[it.json.language] = it.json.content;\n}\n\nconst errors = [];\nconst warnings = [];\n\nconst manifestAssetKeys = new Set();\nif (manifest.assets) {\n  if (manifest.assets.featuredImage) manifestAssetKeys.add(\"featured-main\");\n  if (Array.isArray(manifest.assets.infographics)) {\n    for (const ig of manifest.assets.infographics) { if (ig && ig.key) manifestAssetKeys.add(ig.key); }\n  }\n}\n\nconst placeholderTokens = [\"TODO\", \"TBD\", \"Lorem ipsum\", \"undefined\", \"null\", \"[link]\", \"[اسم الشركة]\", \"[رقم الهاتف]\"];\nconst iframeAllowlist = Array.isArray(job.iframe_allowlist)\n  ? job.iframe_allowlist\n  : ((manifest.validation && Array.isArray(manifest.validation.iframeAllowlist))\n      ? manifest.validation.iframeAllowlist\n      : [\"www.youtube.com\", \"player.vimeo.com\"]);\n\nconst requiredStringFields = [\n  [\"title\", \"title\"],\n  [\"slug\", \"slug\"],\n  [\"excerpt\", \"excerpt\"],\n  [\"bodyHtml\", \"bodyHtml\"],\n  [\"seo.metaTitle\", \"metaTitle\"],\n  [\"seo.metaDescription\", \"metaDescription\"],\n  [\"seo.canonicalPath\", \"canonicalPath\"],\n  [\"seo.robots\", \"robots\"],\n];\n\nfunction getPath(obj, path) {\n  return path.split(\".\").reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);\n}\n\nconst slugByLang = {};\n\nfor (const lang of targets) {\n  const doc = loaded[lang];\n  if (!doc) {\n    errors.push({ code: \"MISSING_LANGUAGE\", language: lang, path: \"content\", message: \"content.json for language \" + lang + \" is missing.\" });\n    continue;\n  }\n  for (const [path, code] of requiredStringFields) {\n    const val = getPath(doc, path);\n    if (val === undefined || val === null || String(val).trim() === \"\") {\n      errors.push({ code: \"MISSING_\" + code.toUpperCase(), language: lang, path, message: path + \" is required.\" });\n    }\n  }\n  const scanText = JSON.stringify(doc || {});\n  for (const token of placeholderTokens) {\n    if (token === \"null\" || token === \"undefined\") {\n      const re = new RegExp(\"\\\\b\" + token + \"\\\\b\", \"i\");\n      const visible = (doc.bodyHtml || \"\") + \" \" + (doc.title || \"\") + \" \" + (doc.excerpt || \"\") + \" \" + ((doc.seo && doc.seo.metaDescription) || \"\");\n      if (re.test(visible)) {\n        errors.push({ code: \"PLACEHOLDER_FOUND\", language: lang, path: \"content\", message: \"Forbidden placeholder found: \" + token });\n      }\n    } else if (scanText.indexOf(token) !== -1) {\n      errors.push({ code: \"PLACEHOLDER_FOUND\", language: lang, path: \"content\", message: \"Forbidden placeholder found: \" + token });\n    }\n  }\n  if (Array.isArray(doc.mediaPlacements)) {\n    for (const mp of doc.mediaPlacements) {\n      if (mp && mp.assetKey && manifestAssetKeys.size > 0 && !manifestAssetKeys.has(mp.assetKey)) {\n        errors.push({ code: \"MEDIA_REF_MISSING\", language: lang, path: \"mediaPlacements\", message: \"Media assetKey '\" + mp.assetKey + \"' is not declared in the manifest.\" });\n      }\n    }\n  }\n  const body = String(doc.bodyHtml || \"\");\n  if (/<script[\\s>]/i.test(body)) {\n    errors.push({ code: \"SCRIPT_TAG_FORBIDDEN\", language: lang, path: \"bodyHtml\", message: \"script tags are not allowed in article body.\" });\n  }\n  const iframeMatches = body.match(/<iframe[^>]*src=[\"']([^\"']+)[\"']/gi) || [];\n  for (const tag of iframeMatches) {\n    const src = (tag.match(/src=[\"']([^\"']+)[\"']/i) || [])[1] || \"\";\n    let host = \"\";\n    try { host = new URL(src).host; } catch (e) { host = src; }\n    if (!iframeAllowlist.includes(host)) {\n      errors.push({ code: \"IFRAME_NOT_ALLOWED\", language: lang, path: \"bodyHtml\", message: \"iframe host not in allowlist: \" + host });\n    }\n  }\n  if (doc.slug) slugByLang[lang] = doc.slug;\n}\n\nconst slugChecks = Object.keys(slugByLang).map(lang => ({ language: lang, slug: slugByLang[lang] }));\n\nreturn [{\n  json: {\n    jobId,\n    siteKey: job.site_key,\n    driveFolderId: job.drive_folder_id,\n    targets,\n    errors,\n    warnings,\n    slugChecks,\n  },\n}];"
       },
       "id": "05e137d8-eaaa-413b-9d91-0b96b2cb301a",
       "name": "13 Validate Content Package",
@@ -268,7 +281,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://example.invalid/api/automation/v1/content/check-slug",
+        "url": "=https://development.example.com/api/automation/v1/content/check-slug",
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ jobId: $json.jobId, checks: $json.slugChecks }) }}",
@@ -277,7 +290,7 @@
         }
       },
       "id": "0d85a8d6-e250-4925-96db-35b419eddbf8",
-      "name": "14 Slug Check — Development Placeholder",
+      "name": "14 Slug Check — Custom Site API Adapter",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.5,
       "position": [
@@ -341,7 +354,13 @@
         3584,
         0
       ],
-      "onError": "continueRegularOutput"
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
     },
     {
       "parameters": {
@@ -362,7 +381,7 @@
       "onError": "continueRegularOutput",
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -386,7 +405,7 @@
       "onError": "continueRegularOutput",
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -408,7 +427,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An unknown error occurred while validating the content package.\";\nlet jobId = j.jobId || null;\nif (!jobId) { try { jobId = $(\"01 Input Trigger\").item.json.jobId || null; } catch (e) { jobId = null; } }\nconst retryable = [\"VALIDATION_LOCKED\", \"INVALID_STATE\"];\nconst nextAllowedActions = retryable.includes(code) ? [\"retry\", \"cancel\"] : [\"cancel\"];\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, message }],\n  nextAllowedActions,\n};"
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An unknown error occurred while validating the content package.\";\nlet jobId = j.jobId || null;\nif (!jobId) { try { jobId = $(\"01 Input Trigger\").item.json.jobId || null; } catch (e) { jobId = null; } }\nconst retryable = [\"VALIDATION_LOCKED\", \"INVALID_STATE\"];\nconst nextAllowedActions = retryable.includes(code) ? [\"retry\", \"cancel\"] : [\"cancel\"];\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions,\n};"
       },
       "id": "b71495fe-e1b9-4f2e-9534-2763d2c9fa4a",
       "name": "99 Build Error Response",
@@ -421,29 +440,13 @@
     },
     {
       "parameters": {
-        "content": "WF-02 Validate Content Package\nStatus gate (CREATED|VALIDATION_FAILED) → conditional UPDATE lock → VALIDATING → load manifest + per-language content.json → field/placeholder/media/script/iframe checks → slug check (MOCK API) → write validation-report.json to 07-reports → set CONTENT_READY / VALIDATION_FAILED.\n\nIMPORTANT: the current content loader is a DEVELOPMENT MOCK. Connect Google Drive and replace the mock loader with real per-language JSON downloads before Production.",
+        "content": "WF-02 Validate Content Package\nStatus gate (CREATED|VALIDATION_FAILED) → conditional UPDATE lock → VALIDATING → load manifest + per-language content.json from Drive → field/placeholder/media/script/iframe checks → slug check (Custom Site API adapter) → write validation-report.json to 07-reports → set CONTENT_READY / VALIDATION_FAILED.",
         "height": 340,
         "width": 420,
         "color": 4
       },
       "id": "38a99470-f63f-49ae-a472-20992afe62bd",
-      "name": "Sticky Note 38a99470",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        0,
-        432
-      ]
-    },
-    {
-      "parameters": {
-        "content": "MOCK: \"14 Slug Check (Mock API)\" points at https://mock.wisal.local/... Replace with the real Custom Website API check-slug endpoint once available.\nErrors → 99 Build Error Response (JOB_NOT_FOUND, INVALID_STATE, VALIDATION_LOCKED). Content errors → 20 Build Response with VALIDATION_FAILED + per-error {code, language, path}.\n\nIMPORTANT: the current content loader is a DEVELOPMENT MOCK. Connect Google Drive and replace the mock loader with real per-language JSON downloads before Production.",
-        "height": 320,
-        "width": 420,
-        "color": 3
-      },
-      "id": "b63547a1-1703-4565-a629-370a8f2de5c0",
-      "name": "Sticky Note b63547a1",
+      "name": "Sticky Note WF02 Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -480,18 +483,18 @@
       "main": [
         [
           {
-            "node": "04 State OK?",
+            "node": "04 State OK Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "04 State OK?": {
+    "04 State OK Check": {
       "main": [
         [
           {
-            "node": "05 Acquire Lock + Set VALIDATING",
+            "node": "05 Acquire Lock and Set VALIDATING",
             "type": "main",
             "index": 0
           }
@@ -505,18 +508,11 @@
         ]
       ]
     },
-    "05 Acquire Lock + Set VALIDATING": {
+    "05 Acquire Lock and Set VALIDATING": {
       "main": [
         [
           {
             "node": "06 Evaluate Lock",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "99 Build Error Response",
             "type": "main",
             "index": 0
           }
@@ -527,14 +523,14 @@
       "main": [
         [
           {
-            "node": "07 Lock OK?",
+            "node": "07 Lock OK Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "07 Lock OK?": {
+    "07 Lock OK Check": {
       "main": [
         [
           {
@@ -578,25 +574,25 @@
       "main": [
         [
           {
-            "node": "11 Find Content File",
+            "node": "11 Find Content File In Drive",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "11 Find Content File": {
+    "11 Find Content File In Drive": {
       "main": [
         [
           {
-            "node": "12 Load Content JSON",
+            "node": "12 Load Content JSON Data",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "12 Load Content JSON": {
+    "12 Load Content JSON Data": {
       "main": [
         [
           {
@@ -611,14 +607,14 @@
       "main": [
         [
           {
-            "node": "14 Slug Check (Mock API)",
+            "node": "14 Slug Check — Custom Site API Adapter",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "14 Slug Check (Mock API)": {
+    "14 Slug Check — Custom Site API Adapter": {
       "main": [
         [
           {
@@ -689,12 +685,5 @@
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate"
-  },
-  "versionId": "b319aae9-0389-4153-83d0-204ccf38e40d",
-  "meta": {
-    "instanceId": "44e48816eb6a635d1d61fd0c5cd53adbe6d17056652229d74479b229836e62fa"
-  },
-  "nodeGroups": [],
-  "id": "f0cwJoSmLG0DRUKU",
-  "tags": []
+  }
 }

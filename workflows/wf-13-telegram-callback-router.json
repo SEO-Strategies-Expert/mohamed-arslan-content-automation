@@ -1,0 +1,324 @@
+{
+  "name": "Mohamed Arslan — WF-13 Telegram Callback Router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mohamed-arslan-telegram-callback",
+        "options": {}
+      },
+      "id": "e130284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        192
+      ],
+      "webhookId": "TELEGRAM_WEBHOOK_ID_PLACEHOLDER"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const body = $json.body || $json;\nconst callback = body.callback_query || {};\nconst fromId = String((callback.from && callback.from.id) || \"\");\nconst allowedUsers = (process.env.TELEGRAM_ALLOWED_USER_IDS || \"\").split(\",\").map(u => u.trim()).filter(Boolean);\n\n// If allowedUsers is set, validate caller\nif (allowedUsers.length > 0 && !allowedUsers.includes(fromId)) {\n  return {\n    ok: false,\n    errorCode: \"UNAUTHORIZED_TELEGRAM_USER\",\n    errorMessage: \"User ID \" + fromId + \" is not authorized to approve content jobs.\",\n    callbackId: callback.id || null\n  };\n}\n\nconst dataStr = (callback.data || \"\").trim();\nconst parts = dataStr.split(\":\");\nconst action = parts[0] || \"\";\nconst jobId = parts[1] || \"\";\n\nconst validActions = [\"approve\", \"publish_now\", \"schedule\", \"reject\", \"retry_assets\", \"cancel\"];\nif (!action || !jobId || !validActions.includes(action)) {\n  return {\n    ok: false,\n    errorCode: \"INVALID_CALLBACK_DATA\",\n    errorMessage: \"Callback data must follow format <action>:<jobId>.\",\n    callbackId: callback.id || null\n  };\n}\n\nreturn {\n  ok: true,\n  action,\n  jobId,\n  fromUser: callback.from ? callback.from.username || fromId : fromId,\n  callbackId: callback.id || null\n};"
+      },
+      "id": "02810294-8172-491a-b812-701928301934",
+      "name": "02 Validate Telegram Callback User",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "03820194-9128-4019-a829-109284019294",
+      "name": "03 Callback Valid Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, status FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "04820194-9128-4091-a829-102938102967",
+      "name": "04 Load Job Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const cb = $(\"02 Validate Telegram Callback User\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nif (!row) {\n  return {\n    ok: false,\n    errorCode: \"JOB_NOT_FOUND\",\n    errorMessage: \"No job found for jobId \" + cb.jobId,\n    callbackId: cb.callbackId\n  };\n}\n\nlet targetStatus = \"APPROVED\";\nif (cb.action === \"reject\") targetStatus = \"REJECTED\";\nif (cb.action === \"cancel\") targetStatus = \"CANCELLED\";\nif (cb.action === \"retry_assets\") targetStatus = \"ASSETS_PROCESSING\";\nif (cb.action === \"schedule\") targetStatus = \"SCHEDULED\";\n\nreturn {\n  ok: true,\n  jobId: row.job_id,\n  action: cb.action,\n  targetStatus,\n  fromUser: cb.fromUser,\n  callbackId: cb.callbackId\n};"
+      },
+      "id": "05820194-9128-4091-a829-102938102968",
+      "name": "05 Determine Target State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs\nSET status = $2, approved_by = $3, approved_at = NOW(), updated_at = NOW()\nWHERE job_id = $1\nRETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.targetStatus, $json.fromUser] }}"
+        }
+      },
+      "id": "06820194-9128-4091-a829-102938102969",
+      "name": "06 Execute State Transition",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'TELEGRAM_CALLBACK_PROCESSED', 'Mohamed Arslan — WF-13 Telegram Callback Router', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ action: $(\"05 Determine Target State\").item.json.action, approvedBy: $(\"05 Determine Target State\").item.json.fromUser })] }}"
+        }
+      },
+      "id": "07820194-9128-4091-a829-102938102970",
+      "name": "07 Log Callback Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1344,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/botTELEGRAM_BOT_TOKEN_PLACEHOLDER/answerCallbackQuery",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ callback_query_id: $(\"05 Determine Target State\").item.json.callbackId, text: \"Action processed: \" + $(\"05 Determine Target State\").item.json.action, show_alert: false }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "08810294-8172-491a-b812-701928301935",
+      "name": "08 Answer Telegram Callback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1568,
+        128
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const st = $(\"05 Determine Target State\").item.json;\nreturn {\n  success: true,\n  jobId: st.jobId,\n  status: st.targetStatus,\n  message: \"Telegram callback action '\" + st.action + \"' executed successfully by user \" + st.fromUser,\n  data: {\n    action: st.action,\n    approvedBy: st.fromUser\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: st.targetStatus === \"APPROVED\" ? [\"publish_now\", \"schedule\", \"cancel\"] : [\"status\"]\n};"
+      },
+      "id": "09829104-9128-4902-8172-910293810304",
+      "name": "09 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNAUTHORIZED\";\nconst message = j.errorMessage || \"Telegram callback query validation failed.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: []\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301933",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-13 Telegram Callback Router\nValidates incoming Telegram callback user against TELEGRAM_ALLOWED_USER_IDS, extracts action and jobId, updates DB job status, logs event, and answers callback.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211329",
+      "name": "Sticky Note WF13 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Telegram Callback User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Validate Telegram Callback User": {
+      "main": [
+        [
+          {
+            "node": "03 Callback Valid Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Callback Valid Check": {
+      "main": [
+        [
+          {
+            "node": "04 Load Job Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Load Job Status": {
+      "main": [
+        [
+          {
+            "node": "05 Determine Target State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Determine Target State": {
+      "main": [
+        [
+          {
+            "node": "06 Execute State Transition",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Execute State Transition": {
+      "main": [
+        [
+          {
+            "node": "07 Log Callback Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Log Callback Event": {
+      "main": [
+        [
+          {
+            "node": "08 Answer Telegram Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Answer Telegram Callback": {
+      "main": [
+        [
+          {
+            "node": "09 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

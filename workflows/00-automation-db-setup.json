@@ -30,7 +30,7 @@
       "onError": "continueRegularOutput",
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -55,7 +55,7 @@
       "onError": "continueRegularOutput",
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -77,7 +77,7 @@
       "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -100,14 +100,14 @@
       "onError": "continueRegularOutput",
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "const expected = ['content_jobs','job_events','content_revisions','media_assets','site_configs'];\nconst found = $(\"04 Verify Tables Exist\").all().map(i => i.json.table_name).filter(Boolean);\nconst missing = expected.filter(t => !found.includes(t));\nconst errors = missing.map(t => ({ code: 'TABLE_MISSING', message: 'Expected table not found after setup: ' + t }));\nconst passed = missing.length === 0;\nreturn [{\n  json: {\n    success: passed,\n    jobId: null,\n    status: passed ? 'DB_READY' : 'DB_SETUP_FAILED',\n    message: passed\n      ? 'All automation tables exist and the development test site config is present.'\n      : 'One or more automation tables are missing after setup.',\n    data: { tablesFound: found, tablesMissing: missing, devSiteKey: 'mohamed-arslan-test-site' },\n    warnings: [],\n    errors,\n    nextAllowedActions: [],\n  },\n}];"
+        "jsCode": "const expected = ['content_jobs','job_events','content_revisions','media_assets','site_configs'];\nconst found = $(\"04 Verify Tables Exist\").all().map(i => i.json.table_name).filter(Boolean);\nconst missing = expected.filter(t => !found.includes(t));\nconst errors = missing.map(t => ({ code: 'TABLE_MISSING', language: null, path: null, message: 'Expected table not found after setup: ' + t }));\nconst passed = missing.length === 0;\nreturn [{\n  json: {\n    success: passed,\n    jobId: null,\n    status: passed ? 'DB_READY' : 'DB_SETUP_FAILED',\n    message: passed\n      ? 'All automation tables exist and the development test site config is present.'\n      : 'One or more automation tables are missing after setup.',\n    data: { tablesFound: found, tablesMissing: missing, devSiteKey: 'mohamed-arslan-test-site' },\n    warnings: [],\n    errors,\n    nextAllowedActions: [],\n  },\n}];"
       },
       "id": "aca52076-ff4a-4de3-bd2d-5f0bc4e24a2b",
       "name": "06 Return Normalized Response",
@@ -120,13 +120,13 @@
     },
     {
       "parameters": {
-        "content": "Automation DB Setup\nRun once (safe to re-run) to build the independent operational PostgreSQL schema for the content automation system. Uses the the existing PostgreSQL credential selected in n8n.",
+        "content": "Automation DB Setup\nRun once (safe to re-run) to build the independent operational PostgreSQL schema for the content automation system. Uses the PostgreSQL credential selected in n8n.",
         "height": 260,
         "width": 360,
         "color": 4
       },
       "id": "26705320-8577-4160-9c6a-789a585b3b9a",
-      "name": "Sticky Note 26705320",
+      "name": "Sticky Note DB Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -136,13 +136,13 @@
     },
     {
       "parameters": {
-        "content": "Schema + verification\n02 enables pgcrypto (non-fatal if the provider forbids it — gen_random_uuid needs it on older Postgres).\n03 creates the 5 tables with CREATE TABLE IF NOT EXISTS in one transaction.\n04 verifies via information_schema. 05 seeds the development test site_config (dev URLs only). 06 returns the normalized response and lists any missing tables.",
+        "content": "Schema + verification\n02 enables pgcrypto (non-fatal if the provider forbids it).\n03 creates the 5 tables with CREATE TABLE IF NOT EXISTS in one transaction.\n04 verifies via information_schema. 05 seeds the development test site_config (dev URLs only). 06 returns the normalized response.",
         "height": 300,
         "width": 440,
         "color": 3
       },
       "id": "c6965d06-a26e-4d23-9700-cb1a2d499edf",
-      "name": "Sticky Note c6965d06",
+      "name": "Sticky Note DB Details",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -213,12 +213,5 @@
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate"
-  },
-  "versionId": "69695add-ff81-4cd7-8e41-205e4b883de8",
-  "meta": {
-    "instanceId": "44e48816eb6a635d1d61fd0c5cd53adbe6d17056652229d74479b229836e62fa"
-  },
-  "nodeGroups": [],
-  "id": "2JBy3RLwMkgww3vn",
-  "tags": []
+  }
 }

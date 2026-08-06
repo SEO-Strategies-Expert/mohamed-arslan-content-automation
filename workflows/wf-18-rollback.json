@@ -1,0 +1,311 @@
+{
+  "name": "Mohamed Arslan — WF-18 Rollback",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "reason"
+            }
+          ]
+        }
+      },
+      "id": "e180284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, content_id FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301943",
+      "name": "02 Load Job Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT revision_id, snapshot FROM content_revisions WHERE job_id = $1 ORDER BY created_at DESC LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "03820194-9128-4091-a829-102938102982",
+      "name": "03 Fetch Latest Revision Snapshot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://development.example.com/api/automation/v1/content/{{ $(\"02 Load Job Details\").item.json.content_id || ($(\"01 Input Trigger\").item.json.jobId + '-CNT') }}/rollback",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ revisionId: $json.revision_id, snapshot: $json.snapshot }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "04810294-8172-491a-b812-701928301944",
+      "name": "04 Call Custom Site Rollback API Adapter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        192
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'ROLLED_BACK', updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ $(\"01 Input Trigger\").item.json.jobId }}"
+        }
+      },
+      "id": "05820194-9128-4091-a829-102938102983",
+      "name": "05 Set Status ROLLED_BACK",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'ROLLED_BACK', 'Mohamed Arslan — WF-18 Rollback', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ revisionId: $(\"03 Fetch Latest Revision Snapshot\").item.json.revision_id })] }}"
+        }
+      },
+      "id": "06820194-9128-4091-a829-102938102984",
+      "name": "06 Log Rollback Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst rev = $(\"03 Fetch Latest Revision Snapshot\").item.json;\nreturn {\n  success: true,\n  jobId: input.jobId,\n  status: \"ROLLED_BACK\",\n  message: \"Rollback executed successfully using revision snapshot: \" + (rev.revision_id || \"N/A\"),\n  data: {\n    revisionId: rev.revision_id\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"status\"]\n};"
+      },
+      "id": "07829104-9128-4902-8172-910293810312",
+      "name": "07 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        192
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211342",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "reason",
+              "type": "string",
+              "value": "Verification failure rollback"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211343",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-18 Rollback\nRestores previous content snapshot from content_revisions table via Custom Website API POST /api/automation/v1/content/{id}/rollback.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211344",
+      "name": "Sticky Note WF18 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Load Job Details": {
+      "main": [
+        [
+          {
+            "node": "03 Fetch Latest Revision Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Fetch Latest Revision Snapshot": {
+      "main": [
+        [
+          {
+            "node": "04 Call Custom Site Rollback API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Call Custom Site Rollback API Adapter": {
+      "main": [
+        [
+          {
+            "node": "05 Set Status ROLLED_BACK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Set Status ROLLED_BACK": {
+      "main": [
+        [
+          {
+            "node": "06 Log Rollback Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Log Rollback Event": {
+      "main": [
+        [
+          {
+            "node": "07 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

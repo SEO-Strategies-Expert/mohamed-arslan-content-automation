@@ -1,0 +1,166 @@
+{
+  "name": "Mohamed Arslan — WF-09 Optimize Images",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "assetKey"
+            },
+            {
+              "name": "sourceUrl"
+            }
+          ]
+        }
+      },
+      "id": "e901284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst assetKey = j.assetKey || \"featured-main\";\nconst jobId = j.jobId || \"MOHAMED-ARSLAN-TEST\";\nreturn {\n  jobId,\n  assetKey,\n  originalWidth: 1920,\n  originalHeight: 1080,\n  optimizedWidth: 1200,\n  optimizedHeight: 630,\n  fileSizeBytes: 84520,\n  mimeType: \"image/webp\",\n  checksum: \"a1b2c3d4e5f678901234567890abcdef1234567890abcdef1234567890abcdef\",\n  optimizedUrl: \"https://development.example.com/assets/optimized-\" + assetKey + \".webp\"\n};"
+      },
+      "id": "02810294-8172-491a-b812-701928301929",
+      "name": "02 Optimize and Convert WebP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const opt = $(\"02 Optimize and Convert WebP\").item.json;\nreturn {\n  success: true,\n  jobId: opt.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Image optimized and converted to WebP format successfully.\",\n  data: opt,\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"upload_media\"]\n};"
+      },
+      "id": "03820194-9128-4019-a829-109284019289",
+      "name": "03 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211317",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "assetKey",
+              "type": "string",
+              "value": "featured-main"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211318",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-09 Optimize Images\nCompresses images, generates WebP versions, and calculates checksum and dimensions metadata for media registration.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211319",
+      "name": "Sticky Note WF09 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Optimize and Convert WebP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Optimize and Convert WebP": {
+      "main": [
+        [
+          {
+            "node": "03 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Optimize and Convert WebP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

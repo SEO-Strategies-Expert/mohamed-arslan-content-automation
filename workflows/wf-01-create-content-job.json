@@ -69,7 +69,7 @@
         "options": {}
       },
       "id": "ca0ac30a-76f6-47c3-b727-699accb67f25",
-      "name": "03 Input Valid?",
+      "name": "03 Input Valid Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -80,7 +80,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const c = $json || {};\nconst jobId = c.jobId || \"\";\n// jobId format: MOHAMED-ARSLAN-<SITE>-<TYPE>-<YYYYMMDD>-<NNNN>\nconst jobIdPattern = /^MOHAMED-ARSLAN-[A-Z0-9]+-[A-Z0-9]+-[0-9]{8}-[0-9]{4}$/;\nlet errorCode = null;\nlet errorMessage = null;\nif (!jobIdPattern.test(jobId)) {\n  errorCode = \"INVALID_JOB_ID\";\n  errorMessage = \"jobId does not match required format MOHAMED-ARSLAN-<SITE>-<TYPE>-<YYYYMMDD>-<NNNN>.\";\n}\nreturn {\n  jobId: c.jobId,\n  siteKey: c.siteKey,\n  environment: c.environment,\n  driveFolderId: c.driveFolderId,\n  ok: errorCode === null,\n  errorCode,\n  errorMessage,\n};"
+        "jsCode": "const c = $json || {};\nconst jobId = c.jobId || \"\";\nconst jobIdPattern = /^MOHAMED-ARSLAN-[A-Z0-9]+-[A-Z0-9]+-[0-9]{8}-[0-9]{4}$/;\nlet errorCode = null;\nlet errorMessage = null;\nif (!jobIdPattern.test(jobId)) {\n  errorCode = \"INVALID_JOB_ID\";\n  errorMessage = \"jobId does not match required format MOHAMED-ARSLAN-<SITE>-<TYPE>-<YYYYMMDD>-<NNNN>.\";\n}\nreturn {\n  jobId: c.jobId,\n  siteKey: c.siteKey,\n  environment: c.environment,\n  driveFolderId: c.driveFolderId,\n  ok: errorCode === null,\n  errorCode,\n  errorMessage,\n};"
       },
       "id": "34e40a67-377d-4970-9615-1812af06478e",
       "name": "04 Validate Job ID",
@@ -117,7 +117,7 @@
         "options": {}
       },
       "id": "4bfa0c3d-38ec-49fc-a541-d931a378ab0a",
-      "name": "05 Job ID Valid?",
+      "name": "05 Job ID Valid Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -144,7 +144,7 @@
       "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -189,7 +189,7 @@
         "options": {}
       },
       "id": "aff5b205-9317-41ce-809b-44066fc859fa",
-      "name": "08 Site OK?",
+      "name": "08 Site OK Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -221,7 +221,13 @@
         352
       ],
       "alwaysOutputData": true,
-      "onError": "continueErrorOutput"
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
     },
     {
       "parameters": {
@@ -263,7 +269,7 @@
         "options": {}
       },
       "id": "1f3b393c-e695-44d2-b1a9-ffa291b31138",
-      "name": "11 Manifest Found?",
+      "name": "11 Manifest Found Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -290,7 +296,13 @@
       "position": [
         2464,
         208
-      ]
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
     },
     {
       "parameters": {
@@ -346,7 +358,7 @@
         "options": {}
       },
       "id": "f56c9b95-61cd-4e62-87c9-fee8de501803",
-      "name": "15 Manifest Valid?",
+      "name": "15 Manifest Valid Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -387,7 +399,7 @@
       "alwaysOutputData": true,
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       }
@@ -432,7 +444,7 @@
         "options": {}
       },
       "id": "77407023-a5fa-446d-8af7-695064426376",
-      "name": "19 Not Duplicate?",
+      "name": "19 Not Duplicate Check",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
@@ -458,7 +470,7 @@
       ],
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       },
@@ -482,7 +494,7 @@
       ],
       "credentials": {
         "postgres": {
-          "id": "bIDzlp9iWQc169BP",
+          "id": "POSTGRES_CREDENTIAL_ID",
           "name": "Postgres account"
         }
       },
@@ -519,7 +531,7 @@
     {
       "parameters": {
         "mode": "runOnceForEachItem",
-        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An unknown error occurred while creating the content job.\";\nlet jobId = j.jobId || null;\nif (!jobId) { try { jobId = $(\"01 Input Trigger\").item.json.jobId || null; } catch (e) { jobId = null; } }\n// Retry is allowed only for transient / correctable cases\nconst retryable = [\"DRIVE_FOLDER_NOT_FOUND\", \"MANIFEST_MISSING\", \"MANIFEST_INVALID\", \"DATABASE_ERROR\"];\nconst nextAllowedActions = retryable.includes(code) ? [\"retry\", \"cancel\"] : [\"cancel\"];\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, message }],\n  nextAllowedActions,\n};"
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An unknown error occurred while creating the content job.\";\nlet jobId = j.jobId || null;\nif (!jobId) { try { jobId = $(\"01 Input Trigger\").item.json.jobId || null; } catch (e) { jobId = null; } }\nconst retryable = [\"DRIVE_FOLDER_NOT_FOUND\", \"MANIFEST_MISSING\", \"MANIFEST_INVALID\", \"DATABASE_ERROR\"];\nconst nextAllowedActions = retryable.includes(code) ? [\"retry\", \"cancel\"] : [\"cancel\"];\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions,\n};"
       },
       "id": "f959f1ec-584c-468f-ad2f-5a8dd0f9f811",
       "name": "99 Build Error Response",
@@ -598,29 +610,13 @@
     },
     {
       "parameters": {
-        "content": "WF-01 Create Content Job\nSub-workflow (Execute Sub-workflow) with an optional Manual Test Trigger. Validates input, then jobId format, loads site_configs, reads manifest.json from Drive, checks duplicates, inserts a CREATED job + job_events row. Returns the normalized response contract.",
+        "content": "WF-01 Create Content Job\nSub-workflow with Manual Test Trigger. Validates input, jobId format, loads site_configs, reads manifest.json from Drive, checks duplicates, inserts CREATED job + job_events row. Returns normalized response.",
         "height": 340,
         "width": 400,
         "color": 4
       },
       "id": "e7855cc9-c03a-4528-94ef-04a39e4e950c",
-      "name": "Sticky Note e7855cc9",
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        -272,
-        -112
-      ]
-    },
-    {
-      "parameters": {
-        "content": "Error paths (all → 99 Build Error Response):\nINVALID_INPUT, INVALID_JOB_ID, SITE_NOT_FOUND, SITE_INACTIVE, ENVIRONMENT_MISMATCH, DRIVE_FOLDER_NOT_FOUND, MANIFEST_MISSING, MANIFEST_INVALID, DUPLICATE_JOB, DATABASE_ERROR.",
-        "height": 320,
-        "width": 400,
-        "color": 3
-      },
-      "id": "d03985cf-17bb-4c22-8c1a-cba0fc6758b7",
-      "name": "Sticky Note d03985cf",
+      "name": "Sticky Note WF01 Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -646,14 +642,14 @@
       "main": [
         [
           {
-            "node": "03 Input Valid?",
+            "node": "03 Input Valid Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "03 Input Valid?": {
+    "03 Input Valid Check": {
       "main": [
         [
           {
@@ -675,14 +671,14 @@
       "main": [
         [
           {
-            "node": "05 Job ID Valid?",
+            "node": "05 Job ID Valid Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "05 Job ID Valid?": {
+    "05 Job ID Valid Check": {
       "main": [
         [
           {
@@ -715,14 +711,14 @@
       "main": [
         [
           {
-            "node": "08 Site OK?",
+            "node": "08 Site OK Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "08 Site OK?": {
+    "08 Site OK Check": {
       "main": [
         [
           {
@@ -762,14 +758,14 @@
       "main": [
         [
           {
-            "node": "11 Manifest Found?",
+            "node": "11 Manifest Found Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "11 Manifest Found?": {
+    "11 Manifest Found Check": {
       "main": [
         [
           {
@@ -813,14 +809,14 @@
       "main": [
         [
           {
-            "node": "15 Manifest Valid?",
+            "node": "15 Manifest Valid Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "15 Manifest Valid?": {
+    "15 Manifest Valid Check": {
       "main": [
         [
           {
@@ -864,14 +860,14 @@
       "main": [
         [
           {
-            "node": "19 Not Duplicate?",
+            "node": "19 Not Duplicate Check",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "19 Not Duplicate?": {
+    "19 Not Duplicate Check": {
       "main": [
         [
           {
@@ -974,12 +970,5 @@
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate"
-  },
-  "versionId": "ac9b730f-8e8a-42a7-af56-b5cf42d56e60",
-  "meta": {
-    "instanceId": "44e48816eb6a635d1d61fd0c5cd53adbe6d17056652229d74479b229836e62fa"
-  },
-  "nodeGroups": [],
-  "id": "kZdNUH8bHiMUTTUC",
-  "tags": []
+  }
 }

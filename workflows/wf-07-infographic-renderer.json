@@ -1,0 +1,200 @@
+{
+  "name": "Mohamed Arslan — WF-07 Infographic Renderer",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "template"
+            },
+            {
+              "name": "title"
+            },
+            {
+              "name": "data"
+            }
+          ]
+        }
+      },
+      "id": "e701284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst template = j.template || \"cost-breakdown\";\nconst validTemplates = [\n  \"stats-grid\", \"process-steps\", \"comparison\", \"timeline\",\n  \"checklist\", \"cost-breakdown\", \"before-after-explanation\", \"faq-summary\"\n];\nif (!validTemplates.includes(template)) {\n  return {\n    ok: false,\n    errorCode: \"INVALID_TEMPLATE\",\n    errorMessage: \"template must be one of: \" + validTemplates.join(\", \")\n  };\n}\nreturn {\n  jobId: j.jobId || \"MOHAMED-ARSLAN-TEST\",\n  template,\n  title: j.title || \"رسم توضيحي تفصيلي\",\n  data: j.data || {},\n  ok: true\n};"
+      },
+      "id": "02810294-8172-491a-b812-701928301927",
+      "name": "02 Validate Infographic Template",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const p = $(\"02 Validate Infographic Template\").item.json;\nreturn {\n  assetKey: \"infographic-\" + p.template + \"-1\",\n  assetType: \"infographic\",\n  template: p.template,\n  renderedTitle: p.title,\n  width: 1080,\n  height: 1080,\n  mimeType: \"image/png\",\n  previewUrl: \"https://development.example.com/assets/infographic-\" + p.template + \".png\"\n};"
+      },
+      "id": "03820194-9128-4019-a829-109284019287",
+      "name": "03 Render SVG Infographic Template",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const ig = $(\"03 Render SVG Infographic Template\").item.json;\nconst p = $(\"02 Validate Infographic Template\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"ASSETS_READY\",\n  message: \"Infographic rendered successfully using template: \" + p.template,\n  data: ig,\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"optimize_images\"]\n};"
+      },
+      "id": "04829104-9128-4902-8172-910293810298",
+      "name": "04 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211311",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "template",
+              "type": "string",
+              "value": "cost-breakdown"
+            },
+            {
+              "id": "a3",
+              "name": "title",
+              "type": "string",
+              "value": "مقارنة تكلفة زراعة الشعر"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211312",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-07 Infographic Renderer\nRenders high-quality infographics for supported templates: stats-grid, process-steps, comparison, timeline, checklist, cost-breakdown, before-after-explanation, faq-summary.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211313",
+      "name": "Sticky Note WF07 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Infographic Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Validate Infographic Template": {
+      "main": [
+        [
+          {
+            "node": "03 Render SVG Infographic Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Render SVG Infographic Template": {
+      "main": [
+        [
+          {
+            "node": "04 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Infographic Template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

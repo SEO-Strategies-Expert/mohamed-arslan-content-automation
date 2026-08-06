@@ -1,0 +1,271 @@
+{
+  "name": "Mohamed Arslan — WF-16 Update Existing Page",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "contentId"
+            }
+          ]
+        }
+      },
+      "id": "e160284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://development.example.com/api/automation/v1/content/{{ $json.contentId || ($json.jobId + '-CNT') }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301939",
+      "name": "02 Fetch Current Page State",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO content_revisions (job_id, content_id, revision_id, snapshot)\nVALUES ($1, $2, $3, $4::jsonb)\nRETURNING id, revision_id;",
+        "options": {
+          "queryReplacement": "={{ [$(\"01 Input Trigger\").item.json.jobId, $(\"01 Input Trigger\").item.json.contentId, (\"REV-UPDATE-\" + Date.now()), JSON.stringify($json)] }}"
+        }
+      },
+      "id": "03820194-9128-4091-a829-102938102977",
+      "name": "03 Save Pre-Update Revision Snapshot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://development.example.com/api/automation/v1/content/{{ $(\"01 Input Trigger\").item.json.contentId }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jobId: $(\"01 Input Trigger\").item.json.jobId, updateMode: \"patch\" }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "04810294-8172-491a-b812-701928301940",
+      "name": "04 Apply Patch Via Custom Site API Adapter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        192
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'VERIFYING', updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ $(\"01 Input Trigger\").item.json.jobId }}"
+        }
+      },
+      "id": "05820194-9128-4091-a829-102938102978",
+      "name": "05 Update Status VERIFYING",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nreturn {\n  success: true,\n  jobId: input.jobId,\n  status: \"VERIFYING\",\n  message: \"Existing page content updated via PATCH. Verification in progress.\",\n  data: {\n    contentId: input.contentId\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"verify\", \"rollback\"]\n};"
+      },
+      "id": "06829104-9128-4902-8172-910293810308",
+      "name": "06 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211336",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "contentId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001-CNT"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211337",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-16 Update Existing Page\nFetches current production page snapshot, saves content_revisions record, applies PATCH via Custom Website API, and moves job to VERIFYING.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211338",
+      "name": "Sticky Note WF16 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Fetch Current Page State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Fetch Current Page State": {
+      "main": [
+        [
+          {
+            "node": "03 Save Pre-Update Revision Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Save Pre-Update Revision Snapshot": {
+      "main": [
+        [
+          {
+            "node": "04 Apply Patch Via Custom Site API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Apply Patch Via Custom Site API Adapter": {
+      "main": [
+        [
+          {
+            "node": "05 Update Status VERIFYING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Update Status VERIFYING": {
+      "main": [
+        [
+          {
+            "node": "06 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Fetch Current Page State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

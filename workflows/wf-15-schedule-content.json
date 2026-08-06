@@ -1,0 +1,322 @@
+{
+  "name": "Mohamed Arslan — WF-15 Schedule Content",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "publishAt"
+            }
+          ]
+        }
+      },
+      "id": "e150284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, status, content_id FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301937",
+      "name": "02 Load Job Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nconst defaultPublishAt = new Date(Date.now() + 86400000).toISOString(); // +24h\nconst scheduledAt = input.publishAt || defaultPublishAt;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + input.jobId;\n}\nreturn { jobId: input.jobId, scheduledAt, ok: errorCode === null, errorCode, errorMessage };"
+      },
+      "id": "03820194-9128-4019-a829-109284019297",
+      "name": "03 Check Schedule Eligibility",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'SCHEDULED', scheduled_at = $2::timestamptz, updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status, scheduled_at;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.scheduledAt] }}"
+        }
+      },
+      "id": "04820194-9128-4091-a829-102938102975",
+      "name": "04 Update Job Status SCHEDULED",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        672,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://development.example.com/api/automation/v1/content/{{ $json.job_id }}/schedule",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ scheduledAt: $json.scheduled_at }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "05810294-8172-491a-b812-701928301938",
+      "name": "05 Call Schedule API Adapter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        896,
+        128
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'SCHEDULED', 'Mohamed Arslan — WF-15 Schedule Content', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.job_id || $(\"03 Check Schedule Eligibility\").item.json.jobId, $execution.id, JSON.stringify({ scheduledAt: $(\"03 Check Schedule Eligibility\").item.json.scheduledAt })] }}"
+        }
+      },
+      "id": "06820194-9128-4091-a829-102938102976",
+      "name": "06 Log Schedule Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const s = $(\"03 Check Schedule Eligibility\").item.json;\nreturn {\n  success: true,\n  jobId: s.jobId,\n  status: \"SCHEDULED\",\n  message: \"Content job scheduled for publication at \" + s.scheduledAt,\n  data: {\n    scheduledAt: s.scheduledAt\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"cancel\"]\n};"
+      },
+      "id": "07829104-9128-4902-8172-910293810307",
+      "name": "07 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An error occurred while scheduling content.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301935",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        352
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211333",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "publishAt",
+              "type": "string",
+              "value": "2026-08-07T12:00:00Z"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211334",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-15 Schedule Content\nSchedules approved content publication via Custom Website API POST /api/automation/v1/content/{id}/schedule and sets job status to SCHEDULED.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211335",
+      "name": "Sticky Note WF15 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Load Job Details": {
+      "main": [
+        [
+          {
+            "node": "03 Check Schedule Eligibility",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Check Schedule Eligibility": {
+      "main": [
+        [
+          {
+            "node": "04 Update Job Status SCHEDULED",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Update Job Status SCHEDULED": {
+      "main": [
+        [
+          {
+            "node": "05 Call Schedule API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Call Schedule API Adapter": {
+      "main": [
+        [
+          {
+            "node": "06 Log Schedule Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Log Schedule Event": {
+      "main": [
+        [
+          {
+            "node": "07 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

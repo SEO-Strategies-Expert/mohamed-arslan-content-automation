@@ -1,0 +1,473 @@
+{
+  "name": "Mohamed Arslan — WF-04 Cancel or Retry Content Job",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "action"
+            },
+            {
+              "name": "reason"
+            }
+          ]
+        }
+      },
+      "id": "e401284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst jobId = (j.jobId || \"\").trim();\nconst action = (j.action || \"\").trim().toLowerCase();\nconst reason = (j.reason || \"Action requested via WF-04\").trim();\nlet errorCode = null;\nlet errorMessage = null;\nif (!jobId) {\n  errorCode = \"INVALID_INPUT\";\n  errorMessage = \"jobId is required.\";\n} else if (![\"cancel\", \"retry\"].includes(action)) {\n  errorCode = \"INVALID_ACTION\";\n  errorMessage = \"action must be either 'cancel' or 'retry'.\";\n}\nreturn { jobId, action, reason, ok: errorCode === null, errorCode, errorMessage };"
+      },
+      "id": "02810294-8172-491a-b812-701928301924",
+      "name": "02 Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "03820194-9128-4019-a829-109284019284",
+      "name": "03 Input Valid Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "cancel",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "cancel"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "retry",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "retry"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "04829104-9128-4902-8172-910293810295",
+      "name": "04 Route By Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        672,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs\nSET status = 'CANCELLED', last_error = $2, updated_at = NOW()\nWHERE job_id = $1 AND status NOT IN ('PUBLISHED','COMPLETED','CANCELLED')\nRETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.reason] }}"
+        }
+      },
+      "id": "10820194-9128-4091-a829-102938102949",
+      "name": "10 Execute Cancel Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'CANCELLED', 'Mohamed Arslan — WF-04 Cancel or Retry Content Job', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$(\"10 Execute Cancel Job\").item.json.job_id, $execution.id, JSON.stringify({ reason: $(\"02 Validate Input\").item.json.reason })] }}"
+        }
+      },
+      "id": "11820194-9128-4091-a829-102938102950",
+      "name": "11 Log Cancel Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"02 Validate Input\").item.json;\nconst row = $(\"10 Execute Cancel Job\").item.json;\nif (!row || !row.job_id) {\n  return {\n    success: false,\n    jobId: input.jobId,\n    status: \"FAILED\",\n    message: \"Job could not be cancelled — non-cancellable status or job not found.\",\n    data: null,\n    warnings: [],\n    errors: [{ code: \"CANCEL_FAILED\", language: null, path: null, message: \"Job is already PUBLISHED, COMPLETED, or CANCELLED.\" }],\n    nextAllowedActions: [\"status\"]\n  };\n}\nreturn {\n  success: true,\n  jobId: row.job_id,\n  status: \"CANCELLED\",\n  message: \"Content job cancelled successfully.\",\n  data: { reason: input.reason },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: []\n};"
+      },
+      "id": "12820194-9128-4091-a829-102938102951",
+      "name": "12 Build Cancel Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs\nSET status = CASE WHEN status = 'VALIDATION_FAILED' THEN 'CREATED' ELSE 'CONTENT_READY' END,\n    retry_count = retry_count + 1,\n    last_error = NULL,\n    updated_at = NOW()\nWHERE job_id = $1 AND status IN ('FAILED','VALIDATION_FAILED','ASSETS_PROCESSING')\nRETURNING job_id, status, retry_count;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "20820194-9128-4091-a829-102938102952",
+      "name": "20 Execute Retry Job",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        448
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'RETRY_INITIATED', 'Mohamed Arslan — WF-04 Cancel or Retry Content Job', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$(\"20 Execute Retry Job\").item.json.job_id, $execution.id, JSON.stringify({ retryCount: $(\"20 Execute Retry Job\").item.json.retry_count, newStatus: $(\"20 Execute Retry Job\").item.json.status })] }}"
+        }
+      },
+      "id": "21820194-9128-4091-a829-102938102953",
+      "name": "21 Log Retry Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1120,
+        448
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"02 Validate Input\").item.json;\nconst row = $(\"20 Execute Retry Job\").item.json;\nif (!row || !row.job_id) {\n  return {\n    success: false,\n    jobId: input.jobId,\n    status: \"FAILED\",\n    message: \"Job could not be retried — status not eligible for retry.\",\n    data: null,\n    warnings: [],\n    errors: [{ code: \"RETRY_FAILED\", language: null, path: null, message: \"Job is not in FAILED, VALIDATION_FAILED, or ASSETS_PROCESSING status.\" }],\n    nextAllowedActions: [\"status\"]\n  };\n}\nreturn {\n  success: true,\n  jobId: row.job_id,\n  status: row.status,\n  message: \"Content job retry initiated successfully.\",\n  data: { newStatus: row.status, retryCount: row.retry_count },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: row.status === \"CREATED\" ? [\"validate\", \"cancel\"] : [\"prepare_assets\", \"cancel\"]\n};"
+      },
+      "id": "22820194-9128-4091-a829-102938102954",
+      "name": "22 Build Retry Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An error occurred processing cancel/retry.\";\nreturn {\n  success: false,\n  jobId: j.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: []\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301929",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        600
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211302",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "action",
+              "type": "string",
+              "value": "cancel"
+            },
+            {
+              "id": "a3",
+              "name": "reason",
+              "type": "string",
+              "value": "Manual testing cancel action"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211303",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        512
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-04 Cancel or Retry Content Job\nValidates input action (cancel or retry) and updates the PostgreSQL operational DB accordingly with full state check and event logging.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211304",
+      "name": "Sticky Note WF04 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        144
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Validate Input": {
+      "main": [
+        [
+          {
+            "node": "03 Input Valid Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Input Valid Check": {
+      "main": [
+        [
+          {
+            "node": "04 Route By Action",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Route By Action": {
+      "main": [
+        [
+          {
+            "node": "10 Execute Cancel Job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "20 Execute Retry Job",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Execute Cancel Job": {
+      "main": [
+        [
+          {
+            "node": "11 Log Cancel Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 Log Cancel Event": {
+      "main": [
+        [
+          {
+            "node": "12 Build Cancel Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "20 Execute Retry Job": {
+      "main": [
+        [
+          {
+            "node": "21 Log Retry Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "21 Log Retry Event": {
+      "main": [
+        [
+          {
+            "node": "22 Build Retry Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

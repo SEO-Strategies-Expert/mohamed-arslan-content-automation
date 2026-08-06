@@ -1,0 +1,418 @@
+{
+  "name": "Mohamed Arslan — WF-11 Create Content Preview",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            }
+          ]
+        }
+      },
+      "id": "e110284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, site_key, status, target_languages FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301931",
+      "name": "02 Load Job Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobId = $(\"01 Input Trigger\").item.json.jobId || ($json && $json.job_id);\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + jobId + \".\";\n} else {\n  const allowed = [\"ASSETS_READY\", \"PREVIEW_CREATING\"];\n  if (!allowed.includes(String(row.status))) {\n    errorCode = \"INVALID_STATE\";\n    errorMessage = \"Preview creation is only allowed from ASSETS_READY or PREVIEW_CREATING. Current status: \" + row.status + \".\";\n  }\n}\nreturn { jobId, job: row, ok: errorCode === null, errorCode, errorMessage };"
+      },
+      "id": "03820194-9128-4019-a829-109284019291",
+      "name": "03 Check Job State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "04829104-9128-4902-8172-910293810301",
+      "name": "04 State OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'PREVIEW_CREATING', updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "05820194-9128-4091-a829-102938102963",
+      "name": "05 Set Status PREVIEW_CREATING",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://development.example.com/api/automation/v1/content/preview",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ jobId: $json.job_id }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "06810294-8172-491a-b812-701928301932",
+      "name": "06 Call Preview API Adapter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1120,
+        128
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobCtx = $(\"03 Check Job State\").item.json.job;\nconst resp = $json || {};\nconst previewUrls = resp.previewUrls || {\n  ar: \"https://development.example.com/preview/ar/hair-transplant-cost-turkey\",\n  en: \"https://development.example.com/preview/en/hair-transplant-cost-turkey\"\n};\nreturn {\n  jobId: jobCtx.job_id,\n  previewUrls\n};"
+      },
+      "id": "07820194-9128-4019-a829-109284019292",
+      "name": "07 Extract Preview URLs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'REVIEW_PENDING', preview_urls = $2::jsonb, updated_at = NOW() WHERE job_id = $1 RETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, JSON.stringify($json.previewUrls)] }}"
+        }
+      },
+      "id": "08820194-9128-4091-a829-102938102964",
+      "name": "08 Update Status REVIEW_PENDING",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1568,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'REVIEW_PENDING', 'Mohamed Arslan — WF-11 Create Content Preview', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ previewUrls: $(\"07 Extract Preview URLs\").item.json.previewUrls })] }}"
+        }
+      },
+      "id": "09820194-9128-4091-a829-102938102965",
+      "name": "09 Log Review Pending Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1792,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const p = $(\"07 Extract Preview URLs\").item.json;\nreturn {\n  success: true,\n  jobId: p.jobId,\n  status: \"REVIEW_PENDING\",\n  message: \"Content preview created successfully and pending human review.\",\n  data: {\n    previewUrls: p.previewUrls\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"approve\", \"reject\", \"cancel\"]\n};"
+      },
+      "id": "10829104-9128-4902-8172-910293810302",
+      "name": "10 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An error occurred while creating content preview.\";\nconst jobId = j.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301932",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        352
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211323",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211324",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-11 Create Content Preview\nCalls Custom Website API preview endpoint POST /api/automation/v1/content/preview, stores preview_urls, and updates status to REVIEW_PENDING.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211325",
+      "name": "Sticky Note WF11 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Load Job Record": {
+      "main": [
+        [
+          {
+            "node": "03 Check Job State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Check Job State": {
+      "main": [
+        [
+          {
+            "node": "04 State OK Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 State OK Check": {
+      "main": [
+        [
+          {
+            "node": "05 Set Status PREVIEW_CREATING",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Set Status PREVIEW_CREATING": {
+      "main": [
+        [
+          {
+            "node": "06 Call Preview API Adapter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Call Preview API Adapter": {
+      "main": [
+        [
+          {
+            "node": "07 Extract Preview URLs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Extract Preview URLs": {
+      "main": [
+        [
+          {
+            "node": "08 Update Status REVIEW_PENDING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Update Status REVIEW_PENDING": {
+      "main": [
+        [
+          {
+            "node": "09 Log Review Pending Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Log Review Pending Event": {
+      "main": [
+        [
+          {
+            "node": "10 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

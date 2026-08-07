@@ -13,15 +13,15 @@
         0,
         112
       ],
-      "webhookId": "f65776b2-de8a-4608-8dbe-e6c9a1221f56"
+      "webhookId": "MCP_WEBHOOK_ID_PLACEHOLDER"
     },
     {
       "parameters": {
         "description": "Create, validate, inspect, cancel, or retry a Mohamed Arslan content automation job. Use \"create\" only after the job folder and manifest.json exist in Google Drive. Use \"validate\" before preparing assets. Provide \"action\" and \"jobId\" on every call; provide siteKey, environment and driveFolderId for \"create\". Actions: create, validate, status, cancel, retry. Returns success, jobId, status, message, data, warnings, errors and nextAllowedActions. Never returns credentials, database records, or raw secrets.",
         "workflowId": {
           "__rl": true,
-          "mode": "id",
-          "value": "6ggApWQ3NBdptZsf",
+          "mode": "name",
+          "value": "",
           "cachedResultName": "Mohamed Arslan — content_job Router"
         },
         "workflowInputs": {
@@ -102,13 +102,13 @@
     },
     {
       "parameters": {
-        "content": "WF-00 MCP Content Gateway\nExposes ONE MCP tool to Claude (keep disconnected until final commissioning): content_job (actions: create, validate, status, cancel, retry). The tool is backed by the content_job Router sub-workflow, which validates input, routes to WF-01/WF-02 or a status/cancel query, and returns the normalized contract. No business logic and no site/DB credentials live in WF-00 itself.\n\nMCP endpoint path: mohamed-arslan-content-mcp",
+        "content": "WF-00 MCP Content Gateway\nExposes ONE MCP tool to Claude (keep disconnected until final commissioning): content_job (actions: create, validate, status, cancel, retry). Backed by content_job Router sub-workflow. No business logic and no site/DB credentials live in WF-00 itself.\n\nMCP endpoint path: mohamed-arslan-content-mcp",
         "height": 320,
         "width": 460,
         "color": 4
       },
       "id": "44b19424-e7e6-46be-940a-6b9f2e96e6e0",
-      "name": "Sticky Note 44b19424",
+      "name": "Sticky Note Gateway Overview",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
@@ -135,12 +135,5 @@
   "settings": {
     "executionOrder": "v1",
     "binaryMode": "separate"
-  },
-  "versionId": "9b7578c5-dd2d-420a-8d91-b496a9a0b6a9",
-  "meta": {
-    "instanceId": "44e48816eb6a635d1d61fd0c5cd53adbe6d17056652229d74479b229836e62fa"
-  },
-  "nodeGroups": [],
-  "id": "Z2U3VChtAmlqzdHX",
-  "tags": []
+  }
 }

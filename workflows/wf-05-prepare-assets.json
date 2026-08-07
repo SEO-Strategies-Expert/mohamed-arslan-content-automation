@@ -1,0 +1,893 @@
+{
+  "name": "Mohamed Arslan — WF-05 Prepare Assets",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            }
+          ]
+        }
+      },
+      "id": "e050284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT c.job_id, c.site_key, c.status, c.manifest_file_id, c.drive_folder_id, c.target_languages, s.publishing_policy FROM content_jobs c LEFT JOIN site_configs s USING (site_key) WHERE c.job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301932",
+      "name": "02 Load Job Details and Policy",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const input = $(\"01 Input Trigger\").item.json;\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + input.jobId;\n} else {\n  const allowed = [\"CONTENT_READY\", \"ASSETS_PROCESSING\"];\n  if (!allowed.includes(String(row.status))) {\n    errorCode = \"INVALID_STATE\";\n    errorMessage = \"Prepare assets is only allowed from CONTENT_READY or ASSETS_PROCESSING. Current status: \" + row.status;\n  }\n}\nreturn { jobId: input.jobId, job: row, lockKey: \"ASSET-LOCK-\" + Date.now(), ok: errorCode === null, errorCode, errorMessage };"
+      },
+      "id": "02B10294-8172-491a-b812-701928301932",
+      "name": "02B Check State Eligibility",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET lock_key = $2, lock_expires_at = NOW() + INTERVAL '5 minutes', status = 'ASSETS_PROCESSING', updated_at = NOW() WHERE job_id = $1 AND status IN ('CONTENT_READY','ASSETS_PROCESSING') AND (lock_expires_at IS NULL OR lock_expires_at < NOW() OR lock_key = $2) RETURNING job_id, lock_key, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.lockKey] }}"
+        }
+      },
+      "id": "03820194-9128-4091-a829-102938102969",
+      "name": "03 Acquire Idempotent Lock and Set Status ASSETS_PROCESSING",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        460,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const locked = ($json && $json.job_id && $json.lock_key) ? true : false;\nconst base = $(\"02B Check State Eligibility\").item.json;\nif (!locked) {\n  return { ok: false, jobId: base.jobId, errorCode: base.errorCode || \"INVALID_STATE\", errorMessage: base.errorMessage || \"Could not acquire assets lock for job.\" };\n}\nreturn { ok: true, jobId: base.jobId, lockKey: base.lockKey, job: base.job };"
+      },
+      "id": "03B20194-9128-4091-a829-102938102969",
+      "name": "03B Verify Lock Acquired",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        570,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "03C20194-9128-4091-a829-102938102969",
+      "name": "03C Lock OK Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        680,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.job.manifest_file_id }}"
+        },
+        "options": {
+          "binaryPropertyName": "data"
+        }
+      },
+      "id": "04810294-8172-491a-b812-701928301933",
+      "name": "04 Download Manifest From Drive",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        800,
+        64
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const base = $(\"03B Verify Lock Acquired\").item.json;\nconst item = $input.item;\nlet manifest = null;\nlet manifestError = null;\n\ntry {\n  if (item.binary && item.binary.data && item.binary.data.data) {\n    const rawStr = Buffer.from(item.binary.data.data, \"base64\").toString(\"utf-8\");\n    manifest = JSON.parse(rawStr);\n  } else {\n    manifestError = \"Manifest file binary data is missing.\";\n  }\n} catch (e) {\n  manifestError = \"Failed to parse job manifest JSON: \" + e.message;\n}\n\nif (!manifest || manifestError) {\n  return {\n    json: {\n      ok: false,\n      jobId: base.jobId,\n      lockKey: base.lockKey,\n      errorCode: \"INVALID_MANIFEST\",\n      errorMessage: manifestError || \"Job manifest file is missing or invalid.\"\n    }\n  };\n}\n\nconst assetTasks = [];\nconst jobTitle = manifest.title || \"\";\nconst jobExcerpt = manifest.excerpt || \"\";\nconst policy = (base.job && base.job.publishing_policy) || {};\n\nif (manifest.assets) {\n  if (manifest.assets.featuredImage) {\n    const fi = manifest.assets.featuredImage;\n    assetTasks.push({\n      jobId: base.jobId,\n      lockKey: base.lockKey,\n      assetKey: \"featured-main\",\n      assetType: \"featured_image\",\n      language: \"ar\",\n      mode: fi.mode || \"generate_background_and_render_text\",\n      headline: fi.headline || jobTitle,\n      subheadline: fi.subheadline || jobExcerpt,\n      driveFileId: fi.driveFileId || null,\n      ok: true\n    });\n  }\n  if (Array.isArray(manifest.assets.infographics)) {\n    for (const ig of manifest.assets.infographics) {\n      if (ig && ig.key) {\n        assetTasks.push({\n          jobId: base.jobId,\n          lockKey: base.lockKey,\n          assetKey: ig.key,\n          assetType: \"infographic\",\n          language: \"ar\",\n          template: ig.template || \"cost-breakdown\",\n          title: ig.title || jobTitle,\n          data: ig.data || {},\n          ok: true\n        });\n      }\n    }\n  }\n  if (manifest.assets.beforeAfter) {\n    const ba = manifest.assets.beforeAfter;\n    assetTasks.push({\n      jobId: base.jobId,\n      lockKey: base.lockKey,\n      assetKey: ba.key || \"before-after-1\",\n      assetType: \"before_after\",\n      language: \"ar\",\n      category: ba.category || \"general\",\n      ok: true\n    });\n  }\n}\n\n// If manifest specifies no assets and policy requires featured image\nif (assetTasks.length === 0 && policy.require_featured_image && jobTitle) {\n  assetTasks.push({\n    jobId: base.jobId,\n    lockKey: base.lockKey,\n    assetKey: \"featured-main\",\n    assetType: \"featured_image\",\n    language: \"ar\",\n    mode: \"generate_background_and_render_text\",\n    headline: jobTitle,\n    subheadline: jobExcerpt,\n    ok: true\n  });\n}\n\nif (assetTasks.length === 0) {\n  return [{\n    json: {\n      jobId: base.jobId,\n      lockKey: base.lockKey,\n      assetKey: null,\n      assetType: \"none\",\n      emptyAssets: true,\n      ok: true\n    }\n  }];\n}\n\nreturn assetTasks.map(task => ({ json: task }));"
+      },
+      "id": "05810294-8172-491a-b812-701928301934",
+      "name": "05 Parse Manifest And Build Asset Tasks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1020,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "05B10294-8172-491a-b812-701928301934",
+      "name": "05B Manifest Valid Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1140,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.assetType }}",
+                    "rightValue": "featured_image",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "featured_image"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.assetType }}",
+                    "rightValue": "infographic",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "infographic"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.assetType }}",
+                    "rightValue": "before_after",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "before_after"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "06810294-8172-491a-b812-701928301935",
+      "name": "06 Route By Asset Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1260,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "",
+          "cachedResultName": "Mohamed Arslan — WF-06 Featured Image Generator"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "07810294-8172-491a-b812-701928301936",
+      "name": "07 Execute WF-06 Featured Image Generator",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1480,
+        -60
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "",
+          "cachedResultName": "Mohamed Arslan — WF-07 Infographic Renderer"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "08810294-8172-491a-b812-701928301937",
+      "name": "08 Execute WF-07 Infographic Renderer",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1480,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "",
+          "cachedResultName": "Mohamed Arslan — WF-08 Before-After Selector"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "09810294-8172-491a-b812-701928301938",
+      "name": "09 Execute WF-08 Before-After Selector",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1480,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "",
+          "cachedResultName": "Mohamed Arslan — WF-09 Optimize Images"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "10810294-8172-491a-b812-701928301939",
+      "name": "10 Execute WF-09 Optimize Images",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1700,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "",
+          "cachedResultName": "Mohamed Arslan — WF-10 Upload Media"
+        },
+        "workflowInputs": {
+          "mappingMode": "autoMapInputData",
+          "value": null
+        },
+        "options": {}
+      },
+      "id": "11810294-8172-491a-b812-701928301940",
+      "name": "11 Execute WF-10 Upload Media",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const tasks = $(\"05 Parse Manifest And Build Asset Tasks\").all();\nconst requiredAssetCount = tasks[0].json.emptyAssets ? 0 : tasks.length;\nconst requiredAssetKeys = tasks[0].json.emptyAssets ? [] : tasks.map(t => t.json.assetKey);\n\nconst uploaded = $(\"11 Execute WF-10 Upload Media\").all() || [];\nconst selected = $(\"09 Execute WF-08 Before-After Selector\").all() || [];\n\nconst completedAssetKeys = [];\nlet failedAssetCount = 0;\nconst errors = [];\n\nfor (const item of uploaded) {\n  const j = item.json || {};\n  if (j && (j.normalized ? j.normalized.success === true : j.success === true)) {\n    completedAssetKeys.push(j.assetKey);\n  } else {\n    failedAssetCount++;\n    errors.push({ code: \"UPLOAD_FAILED\", message: j.message || \"Asset upload failed.\" });\n  }\n}\n\nfor (const item of selected) {\n  const j = item.json || {};\n  if (j && (j.normalized ? j.normalized.success === true : j.success === true)) {\n    completedAssetKeys.push(j.assetKey);\n  } else {\n    failedAssetCount++;\n    errors.push({ code: \"SELECTION_FAILED\", message: j.message || \"Before-after selection failed.\" });\n  }\n}\n\nconst completedAssetCount = completedAssetKeys.length;\nconst passed = (requiredAssetCount === completedAssetCount) && (failedAssetCount === 0);\nconst base = $(\"03B Verify Lock Acquired\").item.json;\n\nreturn {\n  json: {\n    jobId: base.jobId,\n    lockKey: base.lockKey,\n    requiredAssetCount,\n    completedAssetCount,\n    failedAssetCount,\n    requiredAssetKeys,\n    completedAssetKeys,\n    passed,\n    errors\n  }\n};"
+      },
+      "id": "12820194-9128-4019-a829-109284019295",
+      "name": "12 Multi-Branch Asset Aggregator",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2140,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "passed",
+              "leftValue": "={{ $json.passed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "13820194-9128-4091-a829-102938102971",
+      "name": "13 All Uploads Succeeded Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2360,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'ASSETS_READY', lock_key = NULL, lock_expires_at = NULL, updated_at = NOW() WHERE job_id = $1 AND lock_key = $2 RETURNING job_id, status;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.lockKey] }}"
+        }
+      },
+      "id": "14820194-9128-4091-a829-102938102972",
+      "name": "14 Update Job Status ASSETS_READY and Release Lock",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2580,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'ASSETS_READY', 'Mohamed Arslan — WF-05 Prepare Assets', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.job_id, $execution.id, JSON.stringify({ assetCount: $(\"12 Multi-Branch Asset Aggregator\").item.json.completedAssetCount })] }}"
+        }
+      },
+      "id": "15820194-9128-4091-a829-102938102973",
+      "name": "15 Log Assets Ready Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2800,
+        0
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const agg = $(\"12 Multi-Branch Asset Aggregator\").item.json;\nreturn {\n  success: true,\n  jobId: agg.jobId,\n  status: \"ASSETS_READY\",\n  message: \"All required manifest assets generated, optimized, and uploaded successfully.\",\n  data: {\n    completedAssetCount: agg.completedAssetCount,\n    requiredAssetCount: agg.requiredAssetCount,\n    completedAssetKeys: agg.completedAssetKeys\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"create_preview\", \"cancel\"]\n};"
+      },
+      "id": "16829104-9128-4902-8172-910293810306",
+      "name": "16 Return Normalized Success Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3020,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE content_jobs SET status = 'FAILED', last_error = $3, lock_key = NULL, lock_expires_at = NULL, updated_at = NOW() WHERE job_id = $1 AND lock_key = $2;",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $json.lockKey, JSON.stringify($json.errors)] }}"
+        }
+      },
+      "id": "17820194-9128-4091-a829-102938102974",
+      "name": "17 Set Status FAILED On Asset Error and Release Lock",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2580,
+        240
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const res = $(\"12 Multi-Branch Asset Aggregator\").item.json || $(\"05 Parse Manifest And Build Asset Tasks\").item.json || $(\"02B Check State Eligibility\").item.json || $json || {};\nconst code = res.errorCode || (res.errors && res.errors[0] && res.errors[0].code) || \"ASSET_PIPELINE_FAILED\";\nconst message = res.errorMessage || (res.errors && res.errors[0] && res.errors[0].message) || \"Asset pipeline failed during execution.\";\nreturn {\n  success: false,\n  jobId: res.jobId || null,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: res.errors || [{ code, language: null, path: null, message }],\n  nextAllowedActions: [\"retry\", \"cancel\"]\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301934",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2800,
+        240
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211326",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211327",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-05 Prepare Assets\nMulti-asset pipeline parsing manifest from Drive, acquiring DB lock, routing featured images (WF-06), infographics (WF-07), before-after (WF-08) conditionally, aggregating all asset branches, and setting ASSETS_READY strictly when completedAssetCount === requiredAssetCount.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211328",
+      "name": "Sticky Note WF05 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details and Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Load Job Details and Policy": {
+      "main": [
+        [
+          {
+            "node": "02B Check State Eligibility",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02B Check State Eligibility": {
+      "main": [
+        [
+          {
+            "node": "03 Acquire Idempotent Lock and Set Status ASSETS_PROCESSING",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Acquire Idempotent Lock and Set Status ASSETS_PROCESSING": {
+      "main": [
+        [
+          {
+            "node": "03B Verify Lock Acquired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03B Verify Lock Acquired": {
+      "main": [
+        [
+          {
+            "node": "03C Lock OK Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03C Lock OK Check": {
+      "main": [
+        [
+          {
+            "node": "04 Download Manifest From Drive",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Download Manifest From Drive": {
+      "main": [
+        [
+          {
+            "node": "05 Parse Manifest And Build Asset Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Parse Manifest And Build Asset Tasks": {
+      "main": [
+        [
+          {
+            "node": "05B Manifest Valid Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05B Manifest Valid Check": {
+      "main": [
+        [
+          {
+            "node": "06 Route By Asset Type",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "17 Set Status FAILED On Asset Error and Release Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "06 Route By Asset Type": {
+      "main": [
+        [
+          {
+            "node": "07 Execute WF-06 Featured Image Generator",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "08 Execute WF-07 Infographic Renderer",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "09 Execute WF-08 Before-After Selector",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "07 Execute WF-06 Featured Image Generator": {
+      "main": [
+        [
+          {
+            "node": "10 Execute WF-09 Optimize Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "08 Execute WF-07 Infographic Renderer": {
+      "main": [
+        [
+          {
+            "node": "10 Execute WF-09 Optimize Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "09 Execute WF-08 Before-After Selector": {
+      "main": [
+        [
+          {
+            "node": "12 Multi-Branch Asset Aggregator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "10 Execute WF-09 Optimize Images": {
+      "main": [
+        [
+          {
+            "node": "11 Execute WF-10 Upload Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "11 Execute WF-10 Upload Media": {
+      "main": [
+        [
+          {
+            "node": "12 Multi-Branch Asset Aggregator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "12 Multi-Branch Asset Aggregator": {
+      "main": [
+        [
+          {
+            "node": "13 All Uploads Succeeded Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "13 All Uploads Succeeded Check": {
+      "main": [
+        [
+          {
+            "node": "14 Update Job Status ASSETS_READY and Release Lock",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "17 Set Status FAILED On Asset Error and Release Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "14 Update Job Status ASSETS_READY and Release Lock": {
+      "main": [
+        [
+          {
+            "node": "15 Log Assets Ready Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "15 Log Assets Ready Event": {
+      "main": [
+        [
+          {
+            "node": "16 Return Normalized Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "17 Set Status FAILED On Asset Error and Release Lock": {
+      "main": [
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details and Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

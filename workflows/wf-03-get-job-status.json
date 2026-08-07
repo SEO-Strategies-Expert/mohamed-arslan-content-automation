@@ -1,0 +1,290 @@
+{
+  "name": "Mohamed Arslan — WF-03 Get Content Job Status",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            }
+          ]
+        }
+      },
+      "id": "e301284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, site_key, operation, status, source_language, target_languages, drive_folder_id, manifest_file_id, content_id, preview_urls, published_urls, scheduled_at, requested_by, approval_required, approved_by, approved_at, idempotency_key, retry_count, last_error, created_at, updated_at, completed_at FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "f8202931-1029-4110-82a1-9a7281928312",
+      "name": "02 Load Job Record",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobId = $(\"01 Input Trigger\").item.json.jobId || ($json && $json.job_id);\nconst row = ($json && $json.job_id) ? $json : null;\nlet errorCode = null;\nlet errorMessage = null;\nif (!row) {\n  errorCode = \"JOB_NOT_FOUND\";\n  errorMessage = \"No content_jobs row found for jobId \" + jobId + \".\";\n}\nreturn {\n  jobId,\n  job: row,\n  ok: errorCode === null,\n  errorCode,\n  errorMessage,\n};"
+      },
+      "id": "03810294-8172-491a-b812-701928301923",
+      "name": "03 Check Job Found",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "04820194-9128-4019-a829-109284019283",
+      "name": "04 Job Found Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT event_type, workflow_name, execution_id, payload, created_at FROM job_events WHERE job_id = $1 ORDER BY created_at DESC LIMIT 10;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "05829104-9128-4902-8172-910293810294",
+      "name": "05 Load Recent Events",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        128
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const jobCtx = $(\"03 Check Job Found\").item.json;\nconst row = jobCtx.job;\nconst events = $(\"05 Load Recent Events\").all().map(i => i.json).filter(e => e.event_type);\n\nconst nextActionsMap = {\n  CREATED: [\"validate\", \"cancel\"],\n  VALIDATION_FAILED: [\"retry\", \"cancel\"],\n  CONTENT_READY: [\"prepare_assets\", \"cancel\"],\n  ASSETS_READY: [\"create_preview\", \"cancel\"],\n  REVIEW_PENDING: [\"approve\", \"reject\", \"cancel\"],\n  APPROVED: [\"publish_now\", \"schedule\", \"cancel\"],\n  SCHEDULED: [\"cancel\"],\n  PUBLISHED: [\"verify\", \"rollback\"],\n  FAILED: [\"retry\", \"cancel\"],\n  COMPLETED: [],\n  CANCELLED: []\n};\n\nconst nextAllowedActions = nextActionsMap[row.status] || [\"cancel\"];\n\nreturn {\n  success: true,\n  jobId: row.job_id,\n  status: row.status,\n  message: \"Content job status retrieved successfully.\",\n  data: {\n    siteKey: row.site_key,\n    operation: row.operation,\n    sourceLanguage: row.source_language,\n    targetLanguages: row.target_languages,\n    driveFolderId: row.drive_folder_id,\n    contentId: row.content_id,\n    previewUrls: row.preview_urls,\n    publishedUrls: row.published_urls,\n    scheduledAt: row.scheduled_at,\n    requestedBy: row.requested_by,\n    approvalRequired: row.approval_required,\n    approvedBy: row.approved_by,\n    approvedAt: row.approved_at,\n    retryCount: row.retry_count,\n    lastError: row.last_error,\n    createdAt: row.created_at,\n    updatedAt: row.updated_at,\n    completedAt: row.completed_at,\n    recentEvents: events\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions\n};"
+      },
+      "id": "06920194-9128-4091-a829-102938102948",
+      "name": "06 Format Job Status Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"UNKNOWN_ERROR\";\nconst message = j.errorMessage || \"An unknown error occurred while retrieving job status.\";\nconst jobId = j.jobId || null;\nreturn {\n  success: false,\n  jobId,\n  status: \"FAILED\",\n  message,\n  data: null,\n  warnings: [],\n  errors: [{ code, language: null, path: null, message }],\n  nextAllowedActions: []\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301928",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        352
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211299",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211300",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-03 Get Content Job Status\nLoads job state and recent events from operational PostgreSQL DB. Returns full normalized response with allowed next actions.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211301",
+      "name": "Sticky Note WF03 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Load Job Record": {
+      "main": [
+        [
+          {
+            "node": "03 Check Job Found",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Check Job Found": {
+      "main": [
+        [
+          {
+            "node": "04 Job Found Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Job Found Check": {
+      "main": [
+        [
+          {
+            "node": "05 Load Recent Events",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Load Recent Events": {
+      "main": [
+        [
+          {
+            "node": "06 Format Job Status Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

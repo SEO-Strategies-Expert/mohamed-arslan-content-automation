@@ -1,0 +1,241 @@
+{
+  "name": "Mohamed Arslan — WF-09 Optimize Images",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            },
+            {
+              "name": "assetKey"
+            },
+            {
+              "name": "assetType"
+            },
+            {
+              "name": "language"
+            }
+          ]
+        }
+      },
+      "id": "e901284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\nconst j = item.json || {};\nconst jobId = (j.jobId || \"\").trim();\nconst assetKey = (j.assetKey || \"\").trim();\nconst assetType = (j.assetType || \"\").trim();\nconst language = j.language || \"ar\";\nconst binaryObj = item.binary && item.binary.data ? item.binary.data : null;\n\nif (!jobId) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      assetKey,\n      assetType,\n      errorCode: \"MISSING_JOB_ID\",\n      errorMessage: \"jobId is required for image optimization.\"\n    }\n  };\n}\nif (!assetKey) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      assetKey,\n      assetType,\n      errorCode: \"MISSING_ASSET_KEY\",\n      errorMessage: \"assetKey is required for image optimization.\"\n    }\n  };\n}\nif (!assetType) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      assetKey,\n      assetType,\n      errorCode: \"MISSING_ASSET_TYPE\",\n      errorMessage: \"assetType is required for image optimization.\"\n    }\n  };\n}\nif (!binaryObj || !binaryObj.data) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      assetKey,\n      assetType,\n      errorCode: \"MISSING_BINARY_IMAGE\",\n      errorMessage: \"No binary image data supplied for image optimization.\"\n    }\n  };\n}\n\nlet sharp = null;\ntry {\n  sharp = require(\"sharp\");\n} catch (e) {\n  sharp = null;\n}\n\nif (!sharp) {\n  return {\n    json: {\n      ok: false,\n      jobId,\n      assetKey,\n      assetType,\n      errorCode: \"IMAGE_CONVERTER_NOT_CONFIGURED\",\n      errorMessage: \"Image converter (Sharp module) is not configured in this n8n instance. Requires environment variable NODE_FUNCTION_ALLOW_EXTERNAL=sharp and npm install sharp.\"\n    }\n  };\n}\n\nconst crypto = require(\"crypto\");\nconst inputBuffer = Buffer.from(binaryObj.data, \"base64\");\nconst sharpInstance = sharp(inputBuffer);\n\nreturn sharpInstance\n  .metadata()\n  .then(meta => {\n    if (!meta || !meta.width || !meta.height) {\n      throw new Error(\"Could not extract valid width/height metadata from image input.\");\n    }\n    return sharpInstance\n      .webp({ quality: 82 })\n      .toBuffer()\n      .then(webpBuffer => {\n        const fileSizeBytes = webpBuffer.length;\n        const checksum = crypto.createHash(\"sha256\").update(webpBuffer).digest(\"hex\");\n        const base64WebP = webpBuffer.toString(\"base64\");\n        const width = meta.width;\n        const height = meta.height;\n        return {\n          json: {\n            ok: true,\n            jobId,\n            assetKey,\n            assetType,\n            language,\n            width,\n            height,\n            fileSizeBytes,\n            checksum,\n            mimeType: \"image/webp\"\n          },\n          binary: {\n            data: {\n              data: base64WebP,\n              mimeType: \"image/webp\",\n              fileName: `${assetKey}.webp`,\n              fileExtension: \"webp\",\n              fileSize: `${fileSizeBytes} B`\n            }\n          }\n        };\n      });\n  })\n  .catch(err => {\n    return {\n      json: {\n        ok: false,\n        jobId,\n        assetKey,\n        assetType,\n        errorCode: \"WEBP_CONVERSION_FAILED\",\n        errorMessage: \"Sharp WebP conversion failed: \" + err.message\n      }\n    };\n  });"
+      },
+      "id": "02810294-8172-491a-b812-701928301929",
+      "name": "02 Perform WebP Conversion and Metadata Extraction",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ok",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "03820194-9128-4019-a829-109284019299",
+      "name": "03 Conversion Succeeded Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const item = $input.item;\nconst opt = item.json || {};\nconst norm = {\n  success: true,\n  jobId: opt.jobId,\n  status: \"ASSET_OPTIMIZED\",\n  message: \"Image converted to WebP and optimized successfully.\",\n  data: {\n    assetKey: opt.assetKey,\n    assetType: opt.assetType,\n    width: opt.width,\n    height: opt.height,\n    fileSizeBytes: opt.fileSizeBytes,\n    checksum: opt.checksum,\n    mimeType: opt.mimeType\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"upload_media\"]\n};\nreturn {\n  json: {\n    jobId: opt.jobId,\n    assetKey: opt.assetKey,\n    assetType: opt.assetType,\n    language: opt.language,\n    width: opt.width,\n    height: opt.height,\n    fileSizeBytes: opt.fileSizeBytes,\n    checksum: opt.checksum,\n    mimeType: opt.mimeType,\n    normalized: norm\n  },\n  binary: item.binary\n};"
+      },
+      "id": "04829104-9128-4902-8172-910293810314",
+      "name": "04 Return Normalized Response and Envelope",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const j = $json || {};\nconst code = j.errorCode || \"IMAGE_CONVERTER_NOT_CONFIGURED\";\nconst message = j.errorMessage || \"Image converter is not configured in this n8n instance.\";\nconst status = code === \"IMAGE_CONVERTER_NOT_CONFIGURED\" ? \"NOT_CONFIGURED\" : \"FAILED\";\nreturn {\n  json: {\n    success: false,\n    jobId: j.jobId || null,\n    assetKey: j.assetKey || null,\n    assetType: j.assetType || null,\n    status,\n    message,\n    data: null,\n    warnings: [],\n    errors: [{ code, language: null, path: null, message }],\n    nextAllowedActions: [\"retry\", \"cancel\"]\n  },\n  binary: $input.item ? $input.item.binary : undefined\n};"
+      },
+      "id": "99820194-8172-4091-b812-701928301938",
+      "name": "99 Build Error Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        352
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211317",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            },
+            {
+              "id": "a2",
+              "name": "assetKey",
+              "type": "string",
+              "value": "featured-main"
+            },
+            {
+              "id": "a3",
+              "name": "assetType",
+              "type": "string",
+              "value": "featured_image"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211318",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-09 Optimize Images\nRequires binary image input and jobId/assetKey/assetType. Performs WebP conversion & metadata extraction via Sharp module. Fails if dimensions are missing.",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211319",
+      "name": "Sticky Note WF09 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Perform WebP Conversion and Metadata Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Perform WebP Conversion and Metadata Extraction": {
+      "main": [
+        [
+          {
+            "node": "03 Conversion Succeeded Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Conversion Succeeded Check": {
+      "main": [
+        [
+          {
+            "node": "04 Return Normalized Response and Envelope",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "99 Build Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Perform WebP Conversion and Metadata Extraction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": "1.0",
+  "jobId": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001",
+  "siteKey": "mohamed-arslan-test-site",
+  "operation": "create_article",
+  "sourceLanguage": "ar",
+  "targetLanguages": [
+    "ar",
+    "en"
+  ],
+  "driveFolderId": "GOOGLE_DRIVE_TEST_FOLDER_ID",
+  "requestedBy": "editor@example.com",
+  "content": {
+    "briefFileId": "DRIVE_BRIEF_FILE_ID",
+    "researchFolderId": "DRIVE_RESEARCH_FOLDER_ID",
+    "contentFiles": {
+      "ar": "03-content/content-ar.json",
+      "en": "03-content/content-en.json"
+    }
+  },
+  "assets": {
+    "featuredImage": {
+      "mode": "generate_background_and_render_text",
+      "headline": "تكلفة زراعة الشعر في تركيا 2026",
+      "subheadline": "دليل شامل للأسعار والتقنيات",
+      "brandLogo": true
+    },
+    "infographics": [
+      {
+        "key": "cost-breakdown-1",
+        "template": "cost-breakdown",
+        "title": "مقارنة تكلفة زراعة الشعر"
+      }
+    ]
+  },
+  "publication": {
+    "approvalRequired": true,
+    "publishNow": false,
+    "scheduledAt": null
+  },
+  "validation": {
+    "iframeAllowlist": [
+      "www.youtube.com",
+      "player.vimeo.com"
+    ]
+  }
+}

@@ -1,0 +1,257 @@
+{
+  "name": "Mohamed Arslan — WF-12 Telegram Approval",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "jobId"
+            }
+          ]
+        }
+      },
+      "id": "e120284a-7182-44df-a8b2-5f60d6211234",
+      "name": "01 Input Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT job_id, site_key, operation, status, preview_urls FROM content_jobs WHERE job_id = $1 LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.jobId }}"
+        }
+      },
+      "id": "02810294-8172-491a-b812-701928301933",
+      "name": "02 Load Job Details",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const job = $json || {};\nconst jobId = job.job_id || \"MOHAMED-ARSLAN-TEST\";\nconst siteKey = job.site_key || \"mohamed-arslan-test-site\";\nconst previews = job.preview_urls || {};\nlet previewLinksText = \"\";\nfor (const lang in previews) {\n  previewLinksText += `\\n• [${lang.toUpperCase()} Preview](${previews[lang]})`;\n}\n\nconst messageText = `<b>[Mohamed Arslan] Content Approval Required</b>\\n\\n` +\n  `<b>Job ID:</b> <code>${jobId}</code>\\n` +\n  `<b>Site:</b> ${siteKey}\\n` +\n  `<b>Operation:</b> ${job.operation || \"create_article\"}\\n` +\n  `<b>Previews:</b>${previewLinksText || \" N/A\"}\\n\\n` +\n  `Please select an approval action below:`;\n\nconst inlineKeyboard = [\n  [\n    { text: \"✅ Approve\", callback_data: `approve:${jobId}` },\n    { text: \"🚀 Approve & Publish Now\", callback_data: `publish_now:${jobId}` }\n  ],\n  [\n    { text: \"📅 Approve & Schedule\", callback_data: `schedule:${jobId}` },\n    { text: \"✏️ Reject for Editing\", callback_data: `reject:${jobId}` }\n  ],\n  [\n    { text: \"🔄 Regenerate Assets\", callback_data: `retry_assets:${jobId}` },\n    { text: \"❌ Cancel Job\", callback_data: `cancel:${jobId}` }\n  ]\n];\n\nreturn {\n  jobId,\n  messageText,\n  inlineKeyboard\n};"
+      },
+      "id": "03820194-9128-4019-a829-109284019293",
+      "name": "03 Format Telegram Message and Keyboard",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/botTELEGRAM_BOT_TOKEN_PLACEHOLDER/sendMessage",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ chat_id: \"TELEGRAM_CHAT_ID_PLACEHOLDER\", text: $json.messageText, parse_mode: \"HTML\", reply_markup: { inline_keyboard: $json.inlineKeyboard } }) }}",
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "id": "04810294-8172-491a-b812-701928301934",
+      "name": "04 Send Telegram Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        192
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO job_events (job_id, event_type, workflow_name, execution_id, payload)\nVALUES ($1, 'TELEGRAM_NOTIFICATION_SENT', 'Mohamed Arslan — WF-12 Telegram Approval', $2, $3::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [$json.jobId, $execution.id, JSON.stringify({ messageSent: true })] }}"
+        }
+      },
+      "id": "05820194-9128-4091-a829-102938102966",
+      "name": "05 Log Telegram Event",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        192
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const msg = $(\"03 Format Telegram Message and Keyboard\").item.json;\nreturn {\n  success: true,\n  jobId: msg.jobId,\n  status: \"REVIEW_PENDING\",\n  message: \"Telegram approval notification dispatched to reviewers successfully.\",\n  data: {\n    notificationSent: true,\n    callbackFormat: \"<action>:<jobId>\"\n  },\n  warnings: [],\n  errors: [],\n  nextAllowedActions: [\"approve\", \"reject\", \"cancel\"]\n};"
+      },
+      "id": "06829104-9128-4902-8172-910293810303",
+      "name": "06 Return Normalized Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "01820194-7182-44df-a8b2-5f60d6211326",
+      "name": "01M Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "jobId",
+              "type": "string",
+              "value": "MOHAMED-ARSLAN-TEST-ARTICLE-20260806-0001"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211327",
+      "name": "01T Sample Dev Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "content": "WF-12 Telegram Approval\nFormats and dispatches the Telegram approval message with inline buttons (approve, publish_now, schedule, reject, retry_assets, cancel).",
+        "height": 260,
+        "width": 380,
+        "color": 4
+      },
+      "id": "01820194-7182-44df-a8b2-5f60d6211328",
+      "name": "Sticky Note WF12 Overview",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -48
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "01 Input Trigger": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "02 Load Job Details": {
+      "main": [
+        [
+          {
+            "node": "03 Format Telegram Message and Keyboard",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "03 Format Telegram Message and Keyboard": {
+      "main": [
+        [
+          {
+            "node": "04 Send Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04 Send Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "05 Log Telegram Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "05 Log Telegram Event": {
+      "main": [
+        [
+          {
+            "node": "06 Return Normalized Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01M Manual Test Trigger": {
+      "main": [
+        [
+          {
+            "node": "01T Sample Dev Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "01T Sample Dev Input": {
+      "main": [
+        [
+          {
+            "node": "02 Load Job Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}

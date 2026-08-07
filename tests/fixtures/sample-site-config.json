@@ -1,0 +1,25 @@
+{
+  "siteKey": "mohamed-arslan-test-site",
+  "environment": "development",
+  "baseUrl": "https://development.example.com",
+  "apiBaseUrl": "https://development.example.com/api/automation/v1",
+  "defaultLanguage": "ar",
+  "supportedLanguages": [
+    "ar",
+    "en"
+  ],
+  "brandConfig": {
+    "primaryColor": "#1E3A8A",
+    "secondaryColor": "#3B82F6",
+    "fontFamily": "Inter, sans-serif"
+  },
+  "publishingPolicy": {
+    "autoPublishApproved": false,
+    "requireVerification": true
+  },
+  "iframeAllowlist": [
+    "www.youtube.com",
+    "player.vimeo.com"
+  ],
+  "active": true
+}
